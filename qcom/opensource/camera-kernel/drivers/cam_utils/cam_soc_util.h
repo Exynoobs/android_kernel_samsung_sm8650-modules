@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CAM_SOC_UTIL_H_
@@ -97,6 +97,10 @@ enum cam_vote_level {
 
 #define CAM_CESTA_MAX_CLIENTS       3
 #define CAM_NUM_PWR_STATES          2
+
+#if defined(CONFIG_SEC_Q6Q_PROJECT) || defined(CONFIG_SEC_Q6AQ_PROJECT)
+#define UPPER_C2C_DET_GPIO 469
+#endif
 
 /**
  * struct cam_soc_util_hw_client_clk_rates:   Information about HW client clock vote
@@ -273,6 +277,9 @@ struct cam_hw_soc_info {
 
 	uint32_t                        num_rgltr;
 	const char                     *rgltr_name[CAM_SOC_MAX_REGULATOR];
+#if defined(CONFIG_SEC_Q6Q_PROJECT) || defined(CONFIG_SEC_Q6AQ_PROJECT)
+	const char                     *rgltr_subname[CAM_SOC_MAX_REGULATOR];
+#endif
 	uint32_t                        rgltr_ctrl_support;
 	uint32_t                        rgltr_min_volt[CAM_SOC_MAX_REGULATOR];
 	uint32_t                        rgltr_max_volt[CAM_SOC_MAX_REGULATOR];
@@ -608,18 +615,6 @@ int cam_soc_util_clk_disable(struct cam_hw_soc_info *soc_info, int cesta_client_
 	bool optional_clk, int32_t clk_idx);
 
 /**
- * cam_soc_util_dump_clk()
- *
- * @brief:              Dumps all the clocks of the caller hw, using
- *                      clock api.
- *
- * @soc_info:           Device soc information
- * @return:             Success or failure
- */
-
-int cam_soc_util_dump_clk(struct cam_hw_soc_info *soc_info);
-
-/**
  * cam_soc_util_irq_enable()
  *
  * @brief:              Enable IRQ in SOC
@@ -799,10 +794,6 @@ int cam_soc_util_clk_enable_default(struct cam_hw_soc_info *soc_info, int cesta_
 int cam_soc_util_get_clk_level(struct cam_hw_soc_info *soc_info,
 	int64_t clk_rate, int clk_idx, int32_t *clk_lvl);
 
-unsigned long cam_soc_util_get_clk_rate_applied(
-	struct cam_hw_soc_info *soc_info, int32_t index, bool is_src,
-	enum cam_vote_level clk_level);
-
 /* Callback to get reg space data for specific HW */
 typedef int (*cam_soc_util_regspace_data_cb)(uint32_t reg_base_type,
 	void *ctx, struct cam_hw_soc_info **soc_info_ptr,
@@ -822,15 +813,13 @@ typedef int (*cam_soc_util_regspace_data_cb)(uint32_t reg_base_type,
  * @soc_dump_args:         Dump buffer args to dump the soc information.
  * @user_triggered_dump:   Flag to indicate if the dump request is issued by
  *                         user.
- * @cpu_addr:              cpu address of buffer
- * @size:                  size of buffer
  * @return:                Success or Failure
  */
 int cam_soc_util_reg_dump_to_cmd_buf(void *ctx,
 	struct cam_cmd_buf_desc *cmd_desc, uint64_t req_id,
 	cam_soc_util_regspace_data_cb reg_data_cb,
 	struct cam_hw_soc_dump_args *soc_dump_args,
-	bool user_triggered_dump, uintptr_t cpu_addr, size_t buf_size);
+	bool user_triggered_dump);
 
 /**
  * cam_soc_util_print_clk_freq()

@@ -20,7 +20,9 @@ struct completion *cam_sensor_get_i3c_completion(uint32_t index)
 {
 	return &g_i3c_sensor_data[index].probe_complete;
 }
-
+#if defined(CONFIG_SEC_Q6AQ_PROJECT)
+struct cam_sensor_ctrl_t *g_s_ctrls[SEC_SENSOR_ID_MAX];
+#endif
 static int cam_sensor_subdev_close_internal(struct v4l2_subdev *sd,
 	struct v4l2_subdev_fh *fh)
 {
@@ -303,6 +305,20 @@ static int cam_sensor_i2c_component_bind(struct device *dev,
 
 	s_ctrl->sensordata->power_info.dev = soc_info->dev;
 
+#if defined (CONFIG_CAMERA_FRAME_CNT_DBG)
+	s_ctrl->is_thread_started = false;
+	s_ctrl->sensor_thread = NULL;
+#endif
+
+#if defined(CONFIG_SENSOR_RETENTION)
+	for (i = 0; i < SENSOR_SEQ_TYPE_MAX; i++)
+		s_ctrl->sensordata->power_info.is_retention_power_up[i] = 0;
+#endif
+
+#if defined(CONFIG_SEC_Q6AQ_PROJECT)
+	if (s_ctrl->soc_info.index < SEC_SENSOR_ID_MAX)
+		g_s_ctrls[s_ctrl->soc_info.index] = s_ctrl;
+#endif
 	return rc;
 
 free_frame_skip:
@@ -370,7 +386,7 @@ static int cam_sensor_i2c_driver_probe(struct i2c_client *client,
 		return -EFAULT;
 	}
 
-	CAM_DBG(CAM_SENSOR, "Adding sensor component");
+	CAM_ERR(CAM_SENSOR, "Adding sensor component: %s", client->name);
 	rc = component_add(&client->dev, &cam_sensor_i2c_component_ops);
 	if (rc)
 		CAM_ERR(CAM_SENSOR, "failed to add component rc: %d", rc);
@@ -495,10 +511,26 @@ static int cam_sensor_component_bind(struct device *dev,
 	s_ctrl->sensordata->power_info.dev = &pdev->dev;
 	platform_set_drvdata(pdev, s_ctrl);
 	s_ctrl->sensor_state = CAM_SENSOR_INIT;
-	CAM_DBG(CAM_SENSOR, "Component bound successfully for %s", pdev->name);
+	CAM_ERR(CAM_SENSOR, "Component bound successfully for %s", pdev->name);
 
 	g_i3c_sensor_data[soc_info->index].s_ctrl = s_ctrl;
 	init_completion(&g_i3c_sensor_data[soc_info->index].probe_complete);
+
+#if defined (CONFIG_CAMERA_FRAME_CNT_DBG)
+	s_ctrl->is_thread_started = false;
+	s_ctrl->sensor_thread = NULL;
+#endif
+
+
+#if defined(CONFIG_SENSOR_RETENTION)
+	for (i = 0; i < SENSOR_SEQ_TYPE_MAX; i++)
+		s_ctrl->sensordata->power_info.is_retention_power_up[i] = 0;
+#endif
+
+#if defined(CONFIG_SEC_Q6AQ_PROJECT)
+	if (s_ctrl->soc_info.index < SEC_SENSOR_ID_MAX)
+		g_s_ctrls[s_ctrl->soc_info.index] = s_ctrl;
+#endif
 
 	return rc;
 
@@ -577,7 +609,7 @@ static int32_t cam_sensor_driver_platform_probe(
 {
 	int rc = 0;
 
-	CAM_DBG(CAM_SENSOR, "Adding Sensor component for %s", pdev->name);
+	CAM_INFO(CAM_SENSOR, "Adding Sensor component for %s", pdev->name);
 	rc = component_add(&pdev->dev, &cam_sensor_component_ops);
 	if (rc)
 		CAM_ERR(CAM_SENSOR, "failed to add component rc: %d", rc);

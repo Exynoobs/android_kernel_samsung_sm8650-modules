@@ -151,3 +151,41 @@ ddk_headers(
 load(":camera_modules.bzl", "define_camera_module")
 
 define_camera_module()
+
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+string_flag(
+    name = "project_name",
+    build_setting_default = "none",
+)
+config_setting(
+    name = "no_project",
+    flag_values = {":project_name": "none"},
+)
+config_setting(
+    name = "e1q_project",
+    flag_values = {":project_name": "e1q"},
+)
+config_setting(
+    name = "e2q_project",
+    flag_values = {":project_name": "e2q"},
+)
+config_setting(
+    name = "e3q_project",
+    flag_values = {":project_name": "e3q"},
+)
+config_setting(
+    name = "q6q_project",
+    flag_values = {":project_name": "q6q"},
+)
+config_setting(
+    name = "b6q_project",
+    flag_values = {":project_name": "b6q"},
+)
+config_setting(
+    name = "gts10p_project",
+    flag_values = {":project_name": "gts10p"},
+)
+config_setting(
+    name = "q6aq_project",
+    flag_values = {":project_name": "q6aq"},
+)
