@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2018-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/of_platform.h>
@@ -20,6 +20,9 @@
 #include "internal.h"
 #include "lpass-cdc-clk-rsc.h"
 #include <linux/qti-regmap-debugfs.h>
+#if IS_ENABLED(CONFIG_SND_SOC_SAMSUNG_AUDIO)
+#include <sound/samsung/snd_debug_proc.h>
+#endif
 
 #define DRV_NAME "lpass-cdc"
 
@@ -490,8 +493,9 @@ int lpass_cdc_dmic_clk_enable(struct snd_soc_component *component,
 	u8 *dmic_clk_div = NULL;
 	u8 freq_change_mask = 0;
 	u8 clk_div = 0;
+	int ret = 0;
 
-	dev_dbg(component->dev, "%s: enable: %d, tx_mode:%d, dmic: %d\n",
+	dev_info(component->dev, "%s: enable: %d, tx_mode:%d, dmic: %d\n",
 		__func__, enable, tx_mode, dmic);
 
 	switch (dmic) {
@@ -528,29 +532,29 @@ int lpass_cdc_dmic_clk_enable(struct snd_soc_component *component,
 			__func__);
 		return -EINVAL;
 	}
-	dev_dbg(component->dev, "%s: DMIC%d dmic_clk_cnt %d\n",
+	dev_info(component->dev, "%s: DMIC%d dmic_clk_cnt %d\n",
 			__func__, dmic, *dmic_clk_cnt);
 	if (enable) {
 		clk_div = lpass_cdc_dmic_clk_div_get(component, tx_mode);
 		(*dmic_clk_cnt)++;
 		if (*dmic_clk_cnt == 1) {
-			snd_soc_component_update_bits(component,
+			ret = (ret | snd_soc_component_update_bits(component,
 					LPASS_CDC_VA_TOP_CSR_DMIC_CFG,
-					0x80, 0x00);
-			snd_soc_component_update_bits(component, dmic_clk_reg,
-						0x0E, clk_div << 0x1);
-			snd_soc_component_update_bits(component, dmic_clk_reg,
-					dmic_clk_en, dmic_clk_en);
+					0x80, 0x00));
+			ret = (ret | snd_soc_component_update_bits(component, dmic_clk_reg,
+						0x0E, clk_div << 0x1));
+			ret = (ret | snd_soc_component_update_bits(component, dmic_clk_reg,
+					dmic_clk_en, dmic_clk_en));
 		} else {
 			if (*dmic_clk_div > clk_div) {
-				snd_soc_component_update_bits(component,
+				ret = (ret | snd_soc_component_update_bits(component,
 						LPASS_CDC_VA_TOP_CSR_DMIC_CFG,
-						freq_change_mask, freq_change_mask);
-				snd_soc_component_update_bits(component, dmic_clk_reg,
-						0x0E, clk_div << 0x1);
-				snd_soc_component_update_bits(component,
+						freq_change_mask, freq_change_mask));
+				ret = (ret | snd_soc_component_update_bits(component, dmic_clk_reg,
+						0x0E, clk_div << 0x1));
+				ret = (ret | snd_soc_component_update_bits(component,
 						LPASS_CDC_VA_TOP_CSR_DMIC_CFG,
-						freq_change_mask, 0x00);
+						freq_change_mask, 0x00));
 			} else {
 				clk_div = *dmic_clk_div;
 			}
@@ -559,23 +563,23 @@ int lpass_cdc_dmic_clk_enable(struct snd_soc_component *component,
 	} else {
 		(*dmic_clk_cnt)--;
 		if (*dmic_clk_cnt  == 0) {
-			snd_soc_component_update_bits(component, dmic_clk_reg,
-					dmic_clk_en, 0);
+			ret = (ret | snd_soc_component_update_bits(component, dmic_clk_reg,
+					dmic_clk_en, 0));
 			clk_div = 0;
-			snd_soc_component_update_bits(component, dmic_clk_reg,
-							0x0E, clk_div << 0x1);
+			ret = (ret | snd_soc_component_update_bits(component, dmic_clk_reg,
+							0x0E, clk_div << 0x1));
 		} else {
 			clk_div = lpass_cdc_dmic_clk_div_get(component, tx_mode);
 			if (*dmic_clk_div > clk_div) {
 				clk_div = lpass_cdc_dmic_clk_div_get(component, !tx_mode);
-				snd_soc_component_update_bits(component,
+				ret = (ret | snd_soc_component_update_bits(component,
 							LPASS_CDC_VA_TOP_CSR_DMIC_CFG,
-							freq_change_mask, freq_change_mask);
-				snd_soc_component_update_bits(component, dmic_clk_reg,
-								0x0E, clk_div << 0x1);
-				snd_soc_component_update_bits(component,
+							freq_change_mask, freq_change_mask));
+				ret = (ret | snd_soc_component_update_bits(component, dmic_clk_reg,
+								0x0E, clk_div << 0x1));
+				ret = (ret | snd_soc_component_update_bits(component,
 							LPASS_CDC_VA_TOP_CSR_DMIC_CFG,
-							freq_change_mask, 0x00);
+							freq_change_mask, 0x00));
 			} else {
 				clk_div = *dmic_clk_div;
 			}
@@ -583,7 +587,19 @@ int lpass_cdc_dmic_clk_enable(struct snd_soc_component *component,
 		*dmic_clk_div = clk_div;
 	}
 
-	return 0;
+	if (ret < 0) {
+		dev_err(component->dev, "%s: DMIC%d snd_soc_component_update_bits %d dmic_clk_cnt %d\n",
+			__func__, dmic, ret, *dmic_clk_cnt);
+#if IS_ENABLED(CONFIG_SND_SOC_SAMSUNG_AUDIO)
+		sdp_info_print("%s: DMIC%d snd_soc_component_update_bits %d dmic_clk_cnt %d\n",
+			__func__, dmic, ret, *dmic_clk_cnt);
+#endif
+
+	} else {
+		ret = 0;
+	}
+
+	return ret;
 }
 EXPORT_SYMBOL(lpass_cdc_dmic_clk_enable);
 
@@ -824,10 +840,10 @@ int lpass_cdc_get_version(struct device *dev)
 EXPORT_SYMBOL(lpass_cdc_get_version);
 
 static ssize_t lpass_cdc_version_read(struct snd_info_entry *entry,
-				void *file_private_data,
-				struct file *file,
-				char __user *buf, size_t count,
-				loff_t pos)
+				   void *file_private_data,
+				   struct file *file,
+				   char __user *buf, size_t count,
+				   loff_t pos)
 {
 	struct lpass_cdc_priv *priv;
 	char buffer[LPASS_CDC_VERSION_ENTRY_SIZE];
@@ -1164,14 +1180,10 @@ static int lpass_cdc_soc_codec_probe(struct snd_soc_component *component)
 		priv->version = LPASS_CDC_VERSION_2_0;
 	if ((core_id_0 == 0x02) && (core_id_1 == 0x0E))
 		priv->version = LPASS_CDC_VERSION_2_1;
-	if ((core_id_0 == 0x02) && (core_id_1 == 0x0F) && (core_id_2 == 0x50 || core_id_2 == 0x51))
+	if ((core_id_0 == 0x02) && (core_id_1 == 0x0F))
 		priv->version = LPASS_CDC_VERSION_2_5;
 	if ((core_id_0 == 0x02) && (core_id_1 == 0x0F) && (core_id_2 == 0x60 || core_id_2 == 0x61))
 		priv->version = LPASS_CDC_VERSION_2_6;
-	if ((core_id_0 == 0x02) && (core_id_1 == 0x0F) && (core_id_2 == 0x70 || core_id_2 == 0x71))
-		priv->version = LPASS_CDC_VERSION_2_7;
-	if ((core_id_0 == 0x02) && (core_id_1 == 0x0F) && (core_id_2 == 0x80 || core_id_2 == 0x81))
-		priv->version = LPASS_CDC_VERSION_2_8;
 
 	/* call init for supported macros */
 	for (macro_idx = START_MACRO; macro_idx < MAX_MACRO; macro_idx++) {
