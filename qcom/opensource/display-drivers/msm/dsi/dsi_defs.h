@@ -379,6 +379,10 @@ struct dsi_cmd_desc {
 	u32 ctrl;
 	u32 ctrl_flags;
 	ktime_t ts;
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	u8 *ss_txbuf;
+	void *ss_cmd; /* struct ss_cmd_desc *ss_cmd */
+#endif
 };
 
 /**
@@ -395,6 +399,21 @@ struct dsi_panel_cmd_set {
 	u32 count;
 	u32 ctrl_idx;
 	struct dsi_cmd_desc *cmds;
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+#define SUPPORT_PANEL_REVISION	20
+	int ss_cmd_type;
+	char *name;
+	int exclusive_pass;
+
+	/* cmd_set_rev[panel_rev] is pointer to
+	 * describe "struct dsi_panel_cmd_set *set" for each panel revision.
+	 * If you want get cmd_set for panel revision A, get like below.
+	 * struct dsi_panel_cmd_set *set = set->cmd_set_rev[panel_rev];
+	 */
+	void *cmd_set_rev[SUPPORT_PANEL_REVISION];
+
+	void *self_disp_cmd_set_rev;
+#endif
 };
 
 /**
@@ -452,6 +471,24 @@ struct dsi_mode_info {
 	struct msm_roi_caps roi_caps;
 	u32 qsync_min_fps;
 	u32 avr_step_fps;
+
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	/* Identify VRR HS by drm_mode's name.
+	 * drm_mode's name is defined by dsi_mode->timing.sot_hs_mode parsed
+	 * from samsung,mdss-dsi-sot-hs-mode in panel dtsi file.
+	 * ex) drm_mode->name is "1080x2316x60x193345cmdHS" for HS mode.
+	 *     drm_mode->name is "1080x2316x60x193345cmdNS" for NS mode.
+	 * To use this feature, declare different porch between HS and NS modes,
+	 * in panel dtsi file.
+	 * Refer to ss_is_sot_hs_from_drm_mode().
+	 */
+	bool sot_hs_mode;
+
+	/* DDI Passive mode.
+	 * ex) DDI 120hz + TE(AP) is 60hz.
+	 */
+	bool phs_mode;
+#endif
 };
 
 /**

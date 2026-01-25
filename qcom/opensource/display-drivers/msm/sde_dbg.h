@@ -87,7 +87,11 @@ enum sde_dbg_dump_context {
  * "adb shell echo 2 > /sys/kernel/debug/dri/0/debug/reg_dump" before
  * doing the test cases.
  */
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+#define SDE_DBG_DEFAULT_DUMP_MODE	SDE_DBG_DUMP_IN_LOG_LIMITED
+#else
 #define SDE_DBG_DEFAULT_DUMP_MODE	SDE_DBG_DUMP_IN_MEM
+#endif
 
 /*
  * Define blocks for register write logging.
@@ -175,6 +179,10 @@ struct sde_dbg_evtlog {
 	u32 log_size;
 	spinlock_t spin_lock;
 	struct list_head filter_list;
+
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	u32 max_entries; // max_entries for sec_display_debug in dumpstate.
+#endif
 };
 
 extern struct sde_dbg_evtlog *sde_dbg_base_evtlog;
@@ -531,6 +539,12 @@ void sde_evtlog_set_filter(struct sde_dbg_evtlog *evtlog, char *filter);
 int sde_evtlog_get_filter(struct sde_dbg_evtlog *evtlog, int index,
 		char *buf, size_t bufsz);
 
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+void ss_sde_dbg_debugfs_open(void);
+ssize_t ss_sde_evtlog_dump_read(struct file *file, char __user *buff,
+		size_t count, loff_t *ppos);
+#endif
+
 #ifndef CONFIG_DRM_SDE_RSC
 static inline void sde_rsc_debug_dump(u32 mux_sel)
 {
@@ -545,7 +559,7 @@ void sde_rsc_debug_dump(u32 mux_sel);
 
 /**
  * sde_dbg_update_dump_mode - update dump mode to in_coredump mode if devcoredump
- *  fueature is enabled. Default dump mode is in_mem, if HW recovery feature is
+ * feature is enabled. Default dump mode is in_mem, if HW recovery feature is
  *  enabled, this function will be called to set dump mode to in_coredump option.
  * @enable_coredump: if enable_coredump is true, update dump mode to in_coredump,
  *	otherwise reset the dump mode to default mode.

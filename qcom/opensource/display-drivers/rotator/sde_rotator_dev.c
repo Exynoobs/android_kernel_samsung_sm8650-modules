@@ -16,6 +16,7 @@
 #include <linux/of.h>
 #include <linux/dma-mapping.h>
 #include <linux/version.h>
+#include <linux/module.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-event.h>
 #include <media/videobuf2-v4l2.h>
@@ -126,6 +127,12 @@ static void sde_rotator_get_config_from_ctx(struct sde_rotator_ctx *ctx,
 	config->output.format = ctx->format_cap.fmt.pix.pixelformat;
 	config->output.comp_ratio.numer = 1;
 	config->output.comp_ratio.denom = 1;
+
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	/* Increase rotator clock for 3840x2160 4K 30fps UHD video play */
+	if (config->input.width * config->input.height >= ((3840-100)*(2160-100)))
+		config->frame_rate = 60;
+#endif
 
 	/*
 	 * Use compression ratio of the first buffer to estimate
