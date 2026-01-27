@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2020-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CAM_IFE_CSID_HW_VER2_H_
@@ -11,6 +11,8 @@
 #include "cam_ife_csid_hw_intf.h"
 #include "cam_ife_csid_soc.h"
 #include "cam_ife_csid_common.h"
+
+#define CAM_CSID_MAX_FRAME_STATS_CNTR                 5
 
 #define IFE_CSID_VER2_TOP_INFO_VOTE_UP                BIT(16)
 #define IFE_CSID_VER2_TOP_INFO_VOTE_DN                BIT(17)
@@ -250,6 +252,11 @@ struct cam_ife_csid_ver2_rup_aup_mask {
 	uint32_t rup_aup_set_mask;
 };
 
+struct cam_ife_csid_ver2_frame_statistics {
+	uint32_t hbi;
+	uint32_t vbi;
+};
+
 /*
  * struct cam_ife_csid_ver2_path_cfg: place holder for path parameters
  *
@@ -306,6 +313,9 @@ struct cam_ife_csid_ver2_path_cfg {
 	struct timespec64                    eof_ts;
 	struct cam_ife_csid_path_format      path_format[CAM_ISP_VC_DT_CFG];
 	struct cam_csid_secondary_evt_config sec_evt_config;
+	atomic64_t                           frame_stats_cntr;
+	struct cam_ife_csid_ver2_frame_statistics frame_stats[
+		CAM_CSID_MAX_FRAME_STATS_CNTR];
 	uint32_t                             cid;
 	uint32_t                             in_format[CAM_ISP_VC_DT_CFG];
 	uint32_t                             out_format;
@@ -742,12 +752,6 @@ struct cam_ife_csid_ver2_reg_info {
 	const uint32_t                                    num_path_err_irqs;
 	const uint32_t                                    num_top_regs;
 	const uint32_t                                    num_rx_regs;
-	const uint32_t                                    fused_max_dualife_width[
-		   CAM_IFE_CSID_WIDTH_FUSE_VAL_MAX];
-	const uint32_t                                    fused_max_width[
-		   CAM_IFE_CSID_WIDTH_FUSE_VAL_MAX];
-	const uint32_t                                    width_fuse_max_val;
-	bool                                              is_ife_sfe_mapped;
 };
 
 /*

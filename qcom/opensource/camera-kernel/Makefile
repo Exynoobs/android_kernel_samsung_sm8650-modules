@@ -3,15 +3,17 @@
 KBUILD_OPTIONS += CAMERA_KERNEL_ROOT=$(KERNEL_SRC)/$(M)
 KBUILD_OPTIONS += KERNEL_ROOT=$(KERNEL_SRC)
 KBUILD_OPTIONS += MODNAME=camera
-KBUILD_OPTIONS += BOARD_PLATFORM=$(TARGET_BOARD_PLATFORM)
+KBUILD_OPTIONS += BOARD_PLATFORM=pineapple
+KBUILD_OPTIONS += CONFIG_QCOM_SMCINVOKE=m
+KBUILD_OPTIONS += TARGET_SYNX_ENABLE=m
+KBUILD_OPTIONS += CONFIG_MSM_MMRM=y
+KBUILD_OPTIONS += CONFIG_MSM_MMRM_VM=n
+KBUILD_OPTIONS += CONFIG_QTI_SMMU_PROXY=m
+
 KBUILD_EXTRA_SYMBOLS := \
     $(OUT_DIR)/../sm8650-modules/qcom/opensource/mmrm-driver/Module.symvers \
-    $(OUT_DIR)/../sm8650-modules/qcom/opensource/securemsm-kernel/Module.symvers
-
-ifneq ($(BOARD_PLATFORM), volcano)
-KBUILD_EXTRA_SYMBOLS += \
+    $(OUT_DIR)/../sm8650-modules/qcom/opensource/securemsm-kernel/Module.symvers \
     $(OUT_DIR)/../sm8650-modules/qcom/opensource/synx-kernel/Module.symvers
-endif
 
 all: modules
 

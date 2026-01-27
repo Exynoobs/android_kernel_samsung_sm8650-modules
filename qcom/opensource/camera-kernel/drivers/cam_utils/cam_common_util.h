@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #ifndef _CAM_COMMON_UTIL_H_
@@ -30,9 +30,44 @@
 #define CAM_COMMON_IFE_NODE  "IFE"
 #define CAM_COMMON_ICP_NODE  "IPE"
 #define CAM_COMMON_JPEG_NODE "JPEG"
-#define CAM_COMMON_TFE_NODE "TFE"
 
 #define CAM_COMMON_NS_PER_MS              1000000ULL
+
+#if defined(CONFIG_SAMSUNG_DEBUG_HW_INFO)
+#if defined(CONFIG_SEC_E1Q_PROJECT) || defined(CONFIG_SEC_E2Q_PROJECT)
+#define WIDE_CAM 1
+#define UW_CAM 2
+#define TELE1_CAM 0
+#define TELE2_CAM -1
+#define FRONT_CAM 4
+#define COVER_CAM -2
+#define FRONT_AUX -3
+#elif defined(CONFIG_SEC_E3Q_PROJECT)
+#define WIDE_CAM 5
+#define UW_CAM 2
+#define TELE1_CAM 3
+#define TELE2_CAM 1
+#define FRONT_CAM 4
+#define COVER_CAM -1
+#define FRONT_AUX -2
+#elif defined(CONFIG_SEC_Q6Q_PROJECT) || defined(CONFIG_SEC_Q6AQ_PROJECT)
+#define WIDE_CAM 3
+#define UW_CAM 2
+#define TELE1_CAM 1
+#define TELE2_CAM -1
+#define FRONT_CAM 4
+#define COVER_CAM 0
+#define FRONT_AUX -2
+#elif defined(CONFIG_SEC_B6Q_PROJECT) || defined(CONFIG_SEC_GTS10P_PROJECT) || defined(CONFIG_SEC_GTS10U_PROJECT)
+#define WIDE_CAM 1
+#define UW_CAM 2
+#define TELE1_CAM -1
+#define TELE2_CAM -2
+#define FRONT_CAM 4
+#define COVER_CAM -3
+#define FRONT_AUX -4
+#endif
+#endif
 
 #define PTR_TO_U64(ptr) ((uint64_t)(uintptr_t)ptr)
 #define U64_TO_PTR(ptr) ((void *)(uintptr_t)ptr)
@@ -85,26 +120,6 @@
 	rem_jiffies;                                                                         \
 })
 
-/*
- * manage locking between process context and tasklets.
- * use appropriate api based on current context.
- */
-#define _SPIN_LOCK_PROCESS_TO_BH(lock)          \
-({                                              \
-		if (in_task())			\
-			spin_lock_bh(lock);	\
-		else				\
-			spin_lock(lock);	\
-})                                              \
-
-#define _SPIN_UNLOCK_PROCESS_TO_BH(lock)        \
-({                                              \
-		if (in_task())			\
-			spin_unlock_bh(lock);	\
-		else				\
-			spin_unlock(lock);	\
-})                                              \
-
 typedef unsigned long (*cam_common_mini_dump_cb) (void *dst,
 	unsigned long len, void *priv_data);
 
@@ -145,8 +160,7 @@ enum cam_common_evt_inject_str_id_type {
 };
 
 enum cam_common_evt_inject_hw_id {
-	CAM_COMMON_EVT_INJECT_HW_IFE,
-	CAM_COMMON_EVT_INJECT_HW_TFE,
+	CAM_COMMON_EVT_INJECT_HW_ISP,
 	CAM_COMMON_EVT_INJECT_HW_ICP,
 	CAM_COMMON_EVT_INJECT_HW_JPEG,
 	CAM_COMMON_EVT_INJECT_HW_MAX
@@ -430,21 +444,10 @@ int cam_common_register_evt_inject_cb(
 	cam_common_evt_inject_cb evt_inject_cb,
 	enum cam_common_evt_inject_hw_id hw_id);
 
-/**
- * @brief:                 Memory alloc and copy
- *
- * @dst:                   Address of destination address of memory
- * @src:                   Source address of memory
- * @size:                  Length of memory
- *
- * @return                 0 if success in register non-zero if failes
- */
-int cam_common_mem_kdup(void **dst, void *src, size_t size);
-
-/**
- * @brief:                 Free the memory
- *
- * @memory:                Address of memory
- */
-void cam_common_mem_free(void *memory);
+#if defined(CONFIG_SAMSUNG_DEBUG_HW_INFO)
+void cam_check_error_sensor_type(int csiphy_num);
+#endif
+#if IS_ENABLED(CONFIG_SEC_ABC)
+void cam_abc_send_event_mipi_error(int csiphy_num);
+#endif
 #endif /* _CAM_COMMON_UTIL_H_ */
