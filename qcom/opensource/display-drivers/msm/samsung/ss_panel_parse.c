@@ -29,6 +29,7 @@ Copyright (C) 2023, Samsung Electronics. All rights reserved.
 /* disable pll ssc */
 int vdd_pll_ssc_disabled;
 
+#if IS_ENABLED(CONFIG_SDP)
 static void ss_free_cmd_legoop_map(struct cmd_legoop_map *table)
 {
 	int r;
@@ -40,6 +41,7 @@ static void ss_free_cmd_legoop_map(struct cmd_legoop_map *table)
 		kvfree(table->cmds[r]);
 	kvfree(table->cmds);
 }
+#endif
 
 #if IS_ENABLED(CONFIG_DEV_RIL_BRIDGE) || IS_ENABLED(CONFIG_UML)
 static int ss_parse_dyn_mipi_clk_timing_table(struct device_node *np,

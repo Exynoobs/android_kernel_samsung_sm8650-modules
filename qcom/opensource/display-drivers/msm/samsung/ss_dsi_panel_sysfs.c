@@ -29,6 +29,22 @@ Copyright (C) 2015, Samsung Electronics. All rights reserved.
 #include <linux/samsung/sec_param.h>
 #endif
 
+/*
+ * Some kernel builds (e.g. GKI) do not export lcd_device_register to
+ * external modules. To avoid an undefined symbol at link/modpost time,
+ * provide a local stub and redirect calls in this TU to it.
+ * The existing call sites already handle ERR_PTR() via IS_ERR_OR_NULL().
+ */
+static inline struct lcd_device *ss_lcd_device_register(const char *name,
+		struct device *parent, void *devdata,
+		const struct lcd_ops *ops)
+{
+	return ERR_PTR(-ENODEV);
+}
+
+#define lcd_device_register(name, parent, devdata, ops) \
+	ss_lcd_device_register(name, parent, devdata, ops)
+
 /***************************************************************************************
  * FACTORY TEST
  ***************************************************************************************/
@@ -2935,17 +2951,21 @@ static ssize_t ss_dynamic_freq_show(struct device *dev,
 
 	len += scnprintf(buf + len, 100, "idx clk_rate\n");
 
+#if IS_ENABLED(CONFIG_SDP)
 	if (vdd->dyn_mipi_clk.is_adaptive_mipi_v2) {
 		struct adaptive_mipi_v2_info *info = &vdd->dyn_mipi_clk.adaptive_mipi_v2_info;
 
 		for (i = 0; i < info->mipi_clocks_size; i++)
 			len += scnprintf(buf + len, 100, "[%d] %d kbps\n", i, info->mipi_clocks_kbps[i]);
 	} else {
+#endif
 		struct clk_timing_table *timing_table = &vdd->dyn_mipi_clk.clk_timing_table;
 
 		for (i = 0; i < timing_table->tab_size; i++)
 			len += scnprintf(buf + len, 100, "[%d] %d\n", i, timing_table->clk_rate[i]);
+#if IS_ENABLED(CONFIG_SDP)
 	}
+#endif
 
 	len += scnprintf(buf + len, 100, "Write [idx] to dynamic_freq node to set clk_rate.\n");
 	len += scnprintf(buf + len, 100, "To revert it (use rf info), Write -1 to dynamic_freq node.\n");
