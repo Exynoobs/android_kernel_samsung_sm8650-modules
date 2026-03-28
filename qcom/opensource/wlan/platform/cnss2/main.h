@@ -659,6 +659,10 @@ struct cnss_plat_data {
 	u64 feature_list;
 	u32 dt_type;
 	struct kobject *wifi_kobj;
+#ifdef CONFIG_SEC_SS_CNSS_FEATURE_SYSFS
+	u8 dump_mode;
+	struct completion macloader_done;
+#endif /* CONFIG_SEC_SS_CNSS_FEATURE_SYSFS */
 	u16 hang_event_data_len;
 	u32 hang_data_addr_offset;
 	/* bitmap to detect FEM combination */

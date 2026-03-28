@@ -2304,6 +2304,13 @@ static int cnss_pci_set_mhi_state(struct cnss_pci_data *pci_priv,
 	cnss_pr_vdbg("Setting MHI state: %s(%d)\n",
 		     cnss_mhi_state_to_str(mhi_state), mhi_state);
 
+#ifdef CONFIG_SEC_PCIE_SET_EP_STATUS
+	if (mhi_state == CNSS_MHI_INIT || mhi_state == CNSS_MHI_POWER_ON || mhi_state == CNSS_MHI_POWER_OFF){
+		cnss_pr_dbg("Set PCIe EP disabled");
+		sec_pcie_set_ep_enabled(pci_priv->pci_dev, false);
+	}
+#endif /* CONFIG_SEC_PCIE_SET_EP_STATUS */
+
 	switch (mhi_state) {
 	case CNSS_MHI_INIT:
 		ret = mhi_prepare_for_power_up(pci_priv->mhi_ctrl);
@@ -7099,6 +7106,14 @@ static void cnss_mhi_notify_status(struct mhi_controller *mhi_ctrl,
 	if (reason != MHI_CB_IDLE)
 		cnss_pr_dbg("MHI status cb is called with reason %s(%d)\n",
 			    cnss_mhi_notify_status_to_str(reason), reason);
+
+#ifdef CONFIG_SEC_PCIE_SET_EP_STATUS
+	if (reason == MHI_CB_EE_MISSION_MODE) {
+		cnss_pr_dbg("Set PCIe EP enabled");
+		sec_pcie_set_ep_enabled(pci_priv->pci_dev, true);
+
+	}
+#endif /* CONFIG_SEC_PCIE_SET_EP_STATUS */
 
 	switch (reason) {
 	case MHI_CB_IDLE:

@@ -3,6 +3,9 @@ CONFIG_HANDLE_RX_REROUTE_ERR := y
 #Enable DP Bus Vote
 CONFIG_WLAN_FEATURE_DP_BUS_BANDWIDTH := y
 
+#Enable Samsung Feature
+CONFIG_WLAN_SAMSUNG_FEATURE := y
+
 ifeq ($(CONFIG_CNSS_QCA6290), y)
 	ifeq ($(CONFIG_CNSS_EMULATION), y)
 		CONFIG_QCA_WIFI_EMULATION := y
@@ -284,7 +287,9 @@ endif
 
 ifneq ($(DEVELOPER_DISABLE_BUILD_TIMESTAMP), y)
 ifneq ($(WLAN_DISABLE_BUILD_TAG), y)
+ifneq ($(CONFIG_WLAN_SAMSUNG_FEATURE), y)
 CONFIG_BUILD_TAG := y
+endif
 endif
 endif
 
@@ -847,6 +852,13 @@ else ifeq ($(CONFIG_PERF_DEBUG), y)
 else
 	PANIC_ON_BUG := n
 	WLAN_WARN_ON_ASSERT := n
+endif
+
+# Case 05940062 : SS request add disable PANIC_ON_BUG in USER build as SS specific.
+ifeq ($(CONFIG_WLAN_SAMSUNG_FEATURE), y)
+ifeq ($(TARGET_BUILD_VARIANT),user)
+	PANIC_ON_BUG := n
+endif
 endif
 
 # Compile all log levels by default
