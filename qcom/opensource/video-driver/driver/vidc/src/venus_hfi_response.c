@@ -16,6 +16,10 @@
 #include "msm_vidc_fence.h"
 #include "msm_vidc_platform.h"
 
+#if IS_ENABLED(CONFIG_SEC_ABC) //for SM8650 H/W AP defect issue screening - vidc_system_error_0x5000002 / vidc_system_error_0x5000003
+#include <linux/sti/abc_common.h>
+#endif
+
 #define is_in_range(range, val) (((range.begin) < (val)) && ((range.end) > (val)))
 
 extern struct msm_vidc_core *g_core;
