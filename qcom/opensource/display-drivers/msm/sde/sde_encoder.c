@@ -46,6 +46,10 @@
 #include "sde_encoder_dce.h"
 #include "sde_vm.h"
 #include "sde_fence.h"
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+#include <linux/interrupt.h>
+#include "ss_dsi_panel_common.h"
+#endif
 
 #define SDE_DEBUG_ENC(e, fmt, ...) SDE_DEBUG("enc%d " fmt,\
 		(e) ? (e)->base.base.id : -1, ##__VA_ARGS__)
@@ -236,6 +240,13 @@ ktime_t sde_encoder_calc_last_vsync_timestamp(struct drm_encoder *drm_enc)
 		SDE_EVT32(DRMID(drm_enc), vsync_counter >> 32, vsync_counter,
 				qtmr_counter >> 32, qtmr_counter, ktime_to_us(hw_diff_ns),
 				fps, SDE_EVTLOG_ERROR);
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+		/* case 06040596 : add log to check tearing problem due to vsync count */
+		/* ksj TODO: restore log level: debug -> error, after bringup */
+		if (!vsync_counter)
+			SDE_DEBUG_ENC(sde_enc, "Vsync counter is zero!!\n");
+#endif
+
 	} else {
 		tvblank = ktime_sub_ns(cur_time, hw_diff_ns);
 	}
@@ -1807,6 +1818,9 @@ static int _sde_encoder_update_rsc_client(
 	struct drm_display_mode *mode;
 	bool is_vid_mode;
 	struct drm_encoder *enc;
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	struct samsung_display_driver_data *vdd;
+#endif
 
 	if (!drm_enc || !drm_enc->dev) {
 		SDE_ERROR("invalid encoder arguments\n");
@@ -1870,6 +1884,43 @@ static int _sde_encoder_update_rsc_client(
 			 sde_encoder_in_cont_splash(enc))
 			rsc_state = SDE_RSC_CLK_STATE;
 	}
+
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	if (!sde_enc->crtc) {
+		SDE_DEBUG("invalid crtc\n");
+		return 0;
+	}
+
+	SDE_DEBUG("sde_enc->crtc->index %d \n", sde_enc->crtc->index);
+	vdd = ss_get_vdd(sde_enc->crtc->index);
+	if (!vdd)
+		vdd = ss_get_vdd(PRIMARY_DISPLAY_NDX);
+
+	if (vdd->rsc_4_frame_idle && rsc_state == SDE_RSC_CMD_STATE)
+		rsc_state = SDE_RSC_CLK_STATE;
+
+	if (vdd->vrr.support_vrr_based_bl) {
+		if ((vdd->vrr.running_vrr_mdp || vdd->vrr.running_vrr) &&
+				(mode_info->frame_rate < 120)) {
+			LCD_DEBUG(vdd, "During VRR (%d|%d): set max frame_rate: %d --> 120\n",
+					vdd->vrr.running_vrr_mdp,
+					vdd->vrr.running_vrr,
+					mode_info->frame_rate);
+			/* set maximum 120hz rsc fps */
+			mode_info->frame_rate = 120;
+			vdd->vrr.keep_max_rsc_fps = true;
+		} else if (!vdd->vrr.keep_max_rsc_fps &&
+				mode_info->frame_rate != mode_info->frame_rate_org) {
+			LCD_DEBUG(vdd, "VRR fin(%d|%d): restore mode frame_rate: %d -> %d\n",
+					vdd->vrr.running_vrr_mdp,
+					vdd->vrr.running_vrr,
+					mode_info->frame_rate,
+					mode_info->frame_rate_org);
+
+			mode_info->frame_rate = mode_info->frame_rate_org;
+		}
+	}
+#endif
 
 	is_vid_mode = sde_encoder_check_curr_mode(&sde_enc->base,
 				MSM_DISPLAY_VIDEO_MODE);
@@ -2297,6 +2348,9 @@ static void sde_encoder_input_event_handler(struct input_handle *handle,
 	struct sde_encoder_virt *sde_enc = NULL;
 	struct msm_drm_thread *disp_thread = NULL;
 	struct msm_drm_private *priv = NULL;
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	struct samsung_display_driver_data *vdd = NULL;
+#endif
 
 	if (!handle || !handle->handler || !handle->handler->private) {
 		SDE_ERROR("invalid encoder for the input event\n");
@@ -2311,6 +2365,22 @@ static void sde_encoder_input_event_handler(struct input_handle *handle,
 
 	priv = drm_enc->dev->dev_private;
 	sde_enc = to_sde_encoder_virt(drm_enc);
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	if (!sde_enc->crtc) {
+		SDE_DEBUG("invalid crtc\n");
+		return;
+	}
+	SDE_DEBUG("sde_enc->crtc->index %d\n", sde_enc->crtc->index);
+	vdd = ss_get_vdd(sde_enc->crtc->index);
+	if (!vdd)
+		vdd = ss_get_vdd(PRIMARY_DISPLAY_NDX);
+
+	if (ss_is_panel_off(vdd)) {
+		SDE_DEBUG("invalid call during power off, idx %d\n", sde_enc->crtc->index);
+		return;
+	}
+#endif
+
 	if (!sde_enc->crtc || (sde_enc->crtc->index
 			>= ARRAY_SIZE(priv->disp_thread))) {
 		SDE_DEBUG_ENC(sde_enc,
@@ -2429,6 +2499,29 @@ static int _sde_encoder_rc_kickoff(struct drm_encoder *drm_enc,
 
 	/* return if the resource control is already in ON state */
 	if (sde_enc->rc_state == SDE_ENC_RC_STATE_ON) {
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+		struct samsung_display_driver_data *vdd;
+
+		if (!sde_enc->crtc) {
+			SDE_DEBUG("invalid crtc\n");
+		} else {
+			SDE_DEBUG("sde_enc->crtc->index %d \n", sde_enc->crtc->index);
+			vdd = ss_get_vdd(sde_enc->crtc->index);
+			if (!vdd)
+				vdd = ss_get_vdd(PRIMARY_DISPLAY_NDX);
+
+			if (vdd->vrr.support_vrr_based_bl) {
+				if (vdd->vrr.keep_max_rsc_fps &&
+						!vdd->vrr.running_vrr_mdp &&
+						!vdd->vrr.running_vrr) {
+					LCD_DEBUG(vdd, "VRR done, trigger rsc update to restore original rsc fps\n");
+					vdd->vrr.keep_max_rsc_fps = false;
+					_sde_encoder_update_rsc_client(drm_enc, true);
+				}
+			}
+		}
+#endif
+
 		SDE_DEBUG_ENC(sde_enc, "sw_event:%d, rc in ON state\n",
 				sw_event);
 		SDE_EVT32(DRMID(drm_enc), sw_event, sde_enc->rc_state,
@@ -3290,6 +3383,15 @@ static void _sde_encoder_input_handler_register(
 	struct sde_encoder_virt *sde_enc = to_sde_encoder_virt(drm_enc);
 	int rc;
 
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	static bool input_handler_registered = false;
+
+	if (!input_handler_registered)
+		input_handler_registered = true;
+	else
+		return;
+#endif
+
 	if (!sde_encoder_check_curr_mode(drm_enc, MSM_DISPLAY_CMD_MODE) ||
 		!sde_enc->input_event_enabled)
 		return;
@@ -3307,6 +3409,7 @@ static void _sde_encoder_input_handler_register(
 	}
 }
 
+#if !IS_ENABLED(CONFIG_DISPLAY_SAMSUNG) /* CL 16617782 : Excessive delay in setPowerMode because of pending display off */
 static void _sde_encoder_input_handler_unregister(
 		struct drm_encoder *drm_enc)
 {
@@ -3322,6 +3425,7 @@ static void _sde_encoder_input_handler_unregister(
 	}
 
 }
+#endif
 
 static int _sde_encoder_input_handler(
 		struct sde_encoder_virt *sde_enc)
@@ -3699,6 +3803,31 @@ void sde_encoder_virt_reset(struct drm_encoder *drm_enc)
 	sde_rm_release(&sde_kms->rm, drm_enc, false);
 }
 
+static void sde_encoder_wait_for_vsync_event_complete(struct sde_encoder_virt *sde_enc)
+{
+	u32 timeout_ms = DEFAULT_KICKOFF_TIMEOUT_MS;
+	int i, ret;
+
+	if (sde_enc->cur_master)
+		timeout_ms = sde_enc->cur_master->kickoff_timeout_ms;
+
+	ret = wait_event_timeout(sde_enc->vsync_event_wq,
+			!sde_enc->vblank_enabled,
+			msecs_to_jiffies(timeout_ms));
+	SDE_EVT32(timeout_ms, ret);
+
+	if (!ret) {
+		SDE_ERROR("vsync event complete timed out %d\n", ret);
+		SDE_EVT32(ret, SDE_EVTLOG_ERROR);
+		for (i = 0; i < sde_enc->num_phys_encs; i++) {
+			struct sde_encoder_phys *phys = sde_enc->phys_encs[i];
+
+			if (phys && phys->ops.control_vblank_irq)
+				phys->ops.control_vblank_irq(phys, false);
+		}
+	}
+}
+
 static void _sde_encoder_helper_virt_disable(struct drm_encoder *drm_enc)
 {
 	int i;
@@ -3774,8 +3903,9 @@ static void sde_encoder_virt_disable(struct drm_encoder *drm_enc)
 	SDE_EVT32(DRMID(drm_enc));
 
 	_sde_encoder_helper_virt_disable(drm_enc);
-
+#if !IS_ENABLED(CONFIG_DISPLAY_SAMSUNG) /* CL 16617782 : Excessive delay in setPowerMode because of pending display off */
 	_sde_encoder_input_handler_unregister(drm_enc);
+#endif
 
 	flush_delayed_work(&sde_conn->status_work);
 
@@ -3820,6 +3950,7 @@ static void sde_encoder_virt_disable(struct drm_encoder *drm_enc)
 	if (drm_crtc && sde_enc->vblank_enabled) {
 		drm_crtc_vblank_off(drm_crtc);
 		kthread_flush_worker(&priv->event_thread[drm_crtc->index].worker);
+		sde_encoder_wait_for_vsync_event_complete(sde_enc);
 	}
 
 	/*
@@ -4172,6 +4303,9 @@ void sde_encoder_register_vblank_callback(struct drm_encoder *drm_enc,
 			phys->ops.control_vblank_irq(phys, enable);
 	}
 	sde_enc->vblank_enabled = enable;
+
+	if (!enable)
+		wake_up_all(&sde_enc->vsync_event_wq);
 }
 
 void sde_encoder_register_frame_event_callback(struct drm_encoder *drm_enc,
@@ -4335,6 +4469,9 @@ static inline void _sde_encoder_trigger_flush(struct drm_encoder *drm_enc,
 	struct sde_encoder_virt *sde_enc;
 	int pend_ret_fence_cnt;
 	struct sde_connector *c_conn;
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	struct samsung_display_driver_data *vdd = NULL;
+#endif
 
 	if (!drm_enc || !phys) {
 		SDE_ERROR("invalid argument(s), drm_enc %d, phys_enc %d\n",
@@ -4363,6 +4500,27 @@ static inline void _sde_encoder_trigger_flush(struct drm_encoder *drm_enc,
 				ctl->idx - CTL_0);
 		return;
 	}
+
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	if (sde_enc->crtc)
+		vdd = ss_get_vdd(sde_enc->crtc->index);
+	else
+		SDE_DEBUG("invalid crtc\n");
+
+	if (sde_encoder_check_curr_mode(drm_enc, MSM_DISPLAY_VIDEO_MODE)
+			&& sde_enc->crtc && vdd) {
+		/* If video mode, opt, fingermask off */
+		if (vdd->support_optical_fingerprint &&
+				vdd->finger_mask_updated && !vdd->finger_mask) {
+			SDE_INFO("[FINGER MASK] mask state:%d updated:%d\n",
+					vdd->finger_mask, vdd->finger_mask_updated);
+
+			/* block frame update which causes blink shot */
+			atomic_inc(&vdd->block_commit_cnt);
+			ss_wait_for_vsync(vdd, 1, 0);
+		}
+	}
+#endif
 
 	/* update pending counts and trigger kickoff ctl flush atomically */
 	spin_lock_irqsave(&sde_enc->enc_spinlock, lock_flags);
@@ -4397,6 +4555,24 @@ static inline void _sde_encoder_trigger_flush(struct drm_encoder *drm_enc,
 	phys->ops.trigger_flush(phys);
 
 	spin_unlock_irqrestore(&sde_enc->enc_spinlock, lock_flags);
+
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	if (sde_encoder_check_curr_mode(drm_enc, MSM_DISPLAY_VIDEO_MODE)
+			&& sde_enc->crtc && vdd) {
+		SDE_DEBUG("[FINGER MASK]mask state:%d updated:%d\n",
+				vdd->finger_mask, vdd->finger_mask_updated);
+
+		/* If video mode, opt, fingermask off */
+		if (vdd->support_optical_fingerprint &&
+				vdd->finger_mask_updated && !vdd->finger_mask) {
+			ss_brightness_dcs(vdd, 0, BACKLIGHT_FINGERMASK_OFF);
+
+			/* allow frame update */
+			atomic_add_unless(&vdd->block_commit_cnt, -1, 0);
+			wake_up_all(&vdd->block_commit_wq);
+		}
+	}
+#endif
 
 	if (ctl->ops.get_pending_flush) {
 		struct sde_ctl_flush_cfg pending_flush = {0,};
@@ -4876,6 +5052,8 @@ static void sde_encoder_input_event_work_handler(struct kthread_work *work)
 
 	sde_encoder_resource_control(&sde_enc->base,
 			SDE_ENC_RC_EVENT_EARLY_WAKEUP);
+	SDE_ATRACE_END("input_event_work_handler");
+	SDE_ATRACE_END("input_event_work_handler");
 }
 
 static void sde_encoder_early_wakeup_work_handler(struct kthread_work *work)
@@ -5109,6 +5287,62 @@ static int _helper_flush_qsync(struct sde_encoder_phys *phys_enc)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+#include <drm/drm_encoder.h>
+int ss_get_vdd_ndx_from_state(struct drm_atomic_state *old_state)
+{
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *old_crtc_state;
+	int i;
+
+	struct drm_encoder *encoder;
+	struct drm_device *dev;
+
+	struct sde_encoder_virt *sde_enc = NULL;
+	struct sde_encoder_phys *phys;
+
+	struct sde_connector *c_conn;
+	struct dsi_display *display;
+	struct samsung_display_driver_data *vdd;
+	int ndx = -EINVAL;
+
+
+	for_each_old_crtc_in_state(old_state, crtc, old_crtc_state, i) {
+		if (crtc->state->active) {
+			dev = crtc->dev;
+			list_for_each_entry(encoder, &dev->mode_config.encoder_list, head) {
+				if (encoder->crtc == crtc)
+					sde_enc = to_sde_encoder_virt(encoder);
+			}
+		}
+	}
+
+	if (!sde_enc)
+		return -ENODEV;
+
+	/* TOOD: remove below W/A and debug why panic occurs in video mode (DP) or writeback case */
+	if (sde_enc->disp_info.intf_type != DRM_MODE_CONNECTOR_DSI)
+		return MAX_DISPLAY_NDX;
+
+
+	for (i = 0; i < sde_enc->num_phys_encs; i++) {
+		phys = sde_enc->phys_encs[i];
+		if (phys) {
+			c_conn = to_sde_connector(phys->connector);
+			if (!c_conn)
+				return -ENODEV;
+			display = c_conn->display;
+			if (!display)
+				return -ENODEV;
+			vdd = display->panel->panel_private;
+			ndx = vdd->ndx;
+		}
+	}
+
+	return ndx;
+}
+#endif
+
 static void _sde_encoder_helper_hdr_plus_mempool_update(
 		struct sde_encoder_virt *sde_enc)
 {
@@ -5173,9 +5407,17 @@ static int _sde_encoder_prepare_for_kickoff_processing(struct drm_encoder *drm_e
 		}
 	}
 
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	/* QC display driver prevent DMS before without first frame update (commit).
+	 * In above case, it returns error for DMS and it causes kernel panic, in result.
+	 * To prevent the limitation, allow DMS before first frame update, and sets proper DSC setting.
+	 */
+	if (sde_enc->cur_master) {
+#else
 	if (sde_enc->cur_master &&
 			((is_cmd_mode && sde_enc->cur_master->cont_splash_enabled) ||
 			!sde_enc->cur_master->cont_splash_enabled)) {
+#endif
 		rc = sde_encoder_dce_setup(sde_enc, params);
 		if (rc) {
 			SDE_ERROR_ENC(sde_enc, "failed to setup DSC: %d\n", rc);
@@ -6152,6 +6394,11 @@ static int sde_encoder_setup_display(struct sde_encoder_virt *sde_enc,
 	sde_enc->input_event_enabled = test_bit(SDE_FEATURE_TOUCH_WAKEUP,
 						sde_kms->catalog->features);
 
+#if IS_ENABLED(CONFIG_DISPLAY_SAMSUNG)
+	sde_enc->input_event_enabled = true;
+	SDE_INFO("input_event_enabled %d\n", sde_enc->input_event_enabled);
+#endif
+
 	sde_enc->ctl_done_supported = test_bit(SDE_FEATURE_CTL_DONE,
 						sde_kms->catalog->features);
 
@@ -6314,6 +6561,7 @@ struct drm_encoder *sde_encoder_init(struct drm_device *dev, struct msm_display_
 		sde_enc->frame_trigger_mode = FRAME_DONE_WAIT_POSTED_START;
 
 	mutex_init(&sde_enc->rc_lock);
+	init_waitqueue_head(&sde_enc->vsync_event_wq);
 	kthread_init_delayed_work(&sde_enc->delayed_off_work,
 			sde_encoder_off_work);
 	sde_enc->vblank_enabled = false;

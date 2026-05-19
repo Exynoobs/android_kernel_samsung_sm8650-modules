@@ -258,6 +258,10 @@ void sde_kms_rect_merge_rectangles(const struct msm_roi_list *rois,
 				roi_rect->x2, roi_rect->y2,
 				clip.x1, clip.y1,
 				clip.x2, clip.y2);
+		SDE_EVT32(roi_rect->x1, roi_rect->y1,
+				roi_rect->x2, roi_rect->y2,
+				clip.x1, clip.y1,
+				clip.x2, clip.y2);
 	}
 
 	if (clip.x2  && clip.y2) {
@@ -265,6 +269,7 @@ void sde_kms_rect_merge_rectangles(const struct msm_roi_list *rois,
 		result->y = clip.y1;
 		result->w = clip.x2 - clip.x1;
 		result->h = clip.y2 - clip.y1;
+		SDE_EVT32(result->x, result->y, result->w, result->h);
 	}
 }
 

@@ -382,10 +382,13 @@ int sde_rsc_mode2_exit(struct sde_rsc_priv *rsc, enum sde_rsc_state state)
 	for (count = MAX_CHECK_LOOPS; count > 0; count--) {
 		power_status = dss_reg_r(&rsc->wrapper_io,
 				SDE_RSCC_PWR_CTRL, rsc->debug_mode);
+		reg = dss_reg_r(&rsc->drv_io,
+				SDE_RSCC_SEQ_PROGRAM_COUNTER, rsc->debug_mode);
+		SDE_EVT32(power_status, reg);
 		if (!test_bit(POWER_CTRL_BIT_12, &power_status)) {
 			reg = dss_reg_r(&rsc->drv_io,
 				SDE_RSCC_SEQ_PROGRAM_COUNTER, rsc->debug_mode);
-			SDE_EVT32_VERBOSE(count, reg, power_status);
+			SDE_EVT32(count, reg, power_status);
 			rc = 0;
 			break;
 		}
@@ -420,6 +423,10 @@ int sde_rsc_mode2_exit(struct sde_rsc_priv *rsc, enum sde_rsc_state state)
 						reg, rsc->debug_mode);
 	wmb(); /* make sure to enable rsc solver state */
 
+	if (rsc->dispcc_io.len)
+		reg = dss_reg_r(&rsc->dispcc_io, DISP_CC_MDSS_CORE_GDSCR,
+					rsc->debug_mode);
+	SDE_EVT32(reg, rc);
 	rsc_event_trigger(rsc, SDE_RSC_EVENT_POST_CORE_RESTORE);
 
 	return rc;
@@ -429,7 +436,7 @@ static int sde_rsc_mode2_entry_trigger(struct sde_rsc_priv *rsc)
 {
 	int rc;
 	int count, wrapper_status;
-	unsigned long reg;
+	unsigned long reg, prog_cnt;
 
 	/* update qtimers to high during clk & video mode state */
 	if ((rsc->current_state == SDE_RSC_VID_STATE) ||
@@ -468,6 +475,9 @@ static int sde_rsc_mode2_entry_trigger(struct sde_rsc_priv *rsc)
 	for (count = MAX_CHECK_LOOPS; count > 0; count--) {
 		reg = dss_reg_r(&rsc->wrapper_io,
 				SDE_RSCC_PWR_CTRL, rsc->debug_mode);
+		prog_cnt = dss_reg_r(&rsc->drv_io,
+				SDE_RSCC_SEQ_PROGRAM_COUNTER, rsc->debug_mode);
+		SDE_EVT32(reg, prog_cnt);
 		if (test_bit(POWER_CTRL_BIT_12, &reg)) {
 			rc = 0;
 			break;
@@ -525,7 +535,7 @@ static void sde_rsc_reset_mode_0_1(struct sde_rsc_priv *rsc)
 static int sde_rsc_mode2_entry(struct sde_rsc_priv *rsc)
 {
 	int rc = 0, i;
-	u32 reg;
+	u32 reg, reg1 = 0xbad;
 
 	if (rsc->power_collapse_block)
 		return -EINVAL;
@@ -542,6 +552,12 @@ static int sde_rsc_mode2_entry(struct sde_rsc_priv *rsc)
 						0x7, rsc->debug_mode);
 	rsc_event_trigger(rsc, SDE_RSC_EVENT_PRE_CORE_PC);
 
+	if (rsc->dispcc_io.len) {
+		reg1 = dss_reg_r(&rsc->dispcc_io, DISP_CC_MDSS_CORE_GDSCR,
+			rsc->debug_mode);
+		SDE_EVT32(reg1, 0x1111);
+	}
+
 	for (i = 0; i <= MAX_MODE2_ENTRY_TRY; i++) {
 		rc = sde_rsc_mode2_entry_trigger(rsc);
 		if (!rc)
@@ -549,9 +565,13 @@ static int sde_rsc_mode2_entry(struct sde_rsc_priv *rsc)
 
 		reg = dss_reg_r(&rsc->drv_io,
 				SDE_RSCC_SEQ_PROGRAM_COUNTER, rsc->debug_mode);
-		pr_err("mdss gdsc power down failed, instruction:0x%x, rc:%d\n",
-				reg, rc);
-		SDE_EVT32(rc, reg, SDE_EVTLOG_ERROR);
+		if (rsc->dispcc_io.len) {
+			reg = dss_reg_r(&rsc->dispcc_io, DISP_CC_MDSS_CORE_GDSCR,
+				rsc->debug_mode);
+		}
+		pr_err("mdss gdsc power down failed, instruction:0x%x, gdscreg1:0x%x rc:%d\n",
+				reg, reg1, rc);
+		SDE_EVT32(rc, reg, reg1, SDE_EVTLOG_ERROR);
 
 		/* avoid touching f1 qtimer for last try */
 		if (i != MAX_MODE2_ENTRY_TRY)
@@ -568,11 +588,21 @@ static int sde_rsc_mode2_entry(struct sde_rsc_priv *rsc)
 		wmb(); /* force busy on vsync */
 	}
 
+	if (rsc->dispcc_io.len) {
+		reg1 = dss_reg_r(&rsc->dispcc_io, DISP_CC_MDSS_CORE_GDSCR,
+			rsc->debug_mode);
+		SDE_EVT32(reg1, 0x2222);
+	}
 	rsc_event_trigger(rsc, SDE_RSC_EVENT_POST_CORE_PC);
 
 	if (rsc->sw_fs_enabled) {
 		regulator_disable(rsc->fs);
 		rsc->sw_fs_enabled = false;
+	}
+	if (rsc->dispcc_io.len) {
+		reg1 = dss_reg_r(&rsc->dispcc_io, DISP_CC_MDSS_CORE_GDSCR,
+			rsc->debug_mode);
+		SDE_EVT32(reg1, 0x3333);
 	}
 
 	return 0;
@@ -785,6 +815,12 @@ int sde_rsc_debug_show(struct seq_file *s, struct sde_rsc_priv *rsc)
 		 dss_reg_r(&rsc->drv_io, SDE_RSCC_AMC_TCS_MODE_IRQ_STATUS_DRV0,
 				rsc->debug_mode));
 
+	seq_printf(s, "program cnt:0x%x\n",
+		 dss_reg_r(&rsc->drv_io, SDE_RSCC_SEQ_PROGRAM_COUNTER,
+				rsc->debug_mode));
+	seq_printf(s, "powerctrl:0x%x\n",
+		 dss_reg_r(&rsc->wrapper_io, SDE_RSCC_PWR_CTRL,
+				rsc->debug_mode));
 	return 0;
 }
 

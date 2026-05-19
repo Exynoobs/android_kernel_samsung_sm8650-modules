@@ -16,6 +16,12 @@
 #include "dp_aux.h"
 #include "dp_hpd.h"
 #include "dp_debug.h"
+#if defined(CONFIG_SECDP)
+#if defined(CONFIG_SECDP_BIGDATA)
+#include <linux/secdp_bigdata.h>
+#endif
+#include "secdp.h"
+#endif
 
 #define DP_AUX_ENUM_STR(x)		#x
 #define DP_AUX_IPC_NUM_PAGES 10
@@ -69,7 +75,11 @@ struct dp_aux_private {
 	struct dp_aux dp_aux;
 	struct dp_catalog_aux *catalog;
 	struct dp_aux_cfg *cfg;
+#if !defined(CONFIG_SECDP)
 	struct device_node *aux_switch_node;
+#else
+	struct secdp_misc *sec;
+#endif
 	struct mutex mutex;
 	struct completion comp;
 	struct drm_dp_aux drm_aux;
@@ -104,9 +114,11 @@ static void dp_aux_hex_dump(struct drm_dp_aux *drm_aux,
 	int i, linelen, remaining = msg->size;
 	const int rowsize = 16;
 	u8 linebuf[64];
+#if !defined(CONFIG_SECDP)
 	struct dp_aux_private *aux = container_of(drm_aux,
 		struct dp_aux_private, drm_aux);
 	struct dp_aux *dp_aux = &aux->dp_aux;
+#endif
 
 	snprintf(prefix, sizeof(prefix), "%s %s %4xh(%2zu): ",
 		(msg->request & DP_AUX_I2C_MOT) ? "I2C" : "NAT",
@@ -120,10 +132,12 @@ static void dp_aux_hex_dump(struct drm_dp_aux *drm_aux,
 		hex_dump_to_buffer(msg->buffer + i, linelen, rowsize, 1,
 			linebuf, sizeof(linebuf), false);
 
+#if !defined(CONFIG_SECDP)
 		if (msg->size == 1 && msg->address == 0)
 			DP_DEBUG_V("%s%s\n", prefix, linebuf);
 		else
 			DP_AUX_DEBUG(dp_aux, "%s%s\n", prefix, linebuf);
+#endif
 	}
 }
 
@@ -209,6 +223,21 @@ static u32 dp_aux_write(struct dp_aux_private *aux,
 	return len;
 }
 
+#if defined(CONFIG_SECDP)
+#define DDC_SEGMENT_ADDR 0x30
+
+static bool secdp_check_seg_addr(struct dp_aux_private *aux,
+		struct drm_dp_aux_msg *msg)
+{
+	if (msg->address == DDC_SEGMENT_ADDR &&
+			!(msg->request & DP_AUX_I2C_READ) &&
+			msg->size == 1)
+		return true;
+
+	return false;
+}
+#endif
+
 static int dp_aux_cmd_fifo_tx(struct dp_aux_private *aux,
 		struct drm_dp_aux_msg *msg)
 {
@@ -239,6 +268,15 @@ static int dp_aux_cmd_fifo_tx(struct dp_aux_private *aux,
 	if (aux->aux_error_num == DP_AUX_ERR_NONE) {
 		ret = len;
 	} else {
+#if defined(CONFIG_SECDP)
+		if (secdp_check_seg_addr(aux, msg)) {
+			DP_AUX_ERR(dp_aux, "ignore %s during [%s]\n",
+				dp_aux_get_error(aux->aux_error_num), prefix);
+			aux->aux_error_num = DP_AUX_ERR_NONE;
+			return msg->size;
+		}
+#endif
+
 		DP_AUX_WARN_RATELIMITED(dp_aux, "aux err [%s] during [%s]\n",
 				dp_aux_get_error(aux->aux_error_num), prefix);
 		ret = -EINVAL;
@@ -298,6 +336,13 @@ static void dp_aux_native_handler(struct dp_aux_private *aux)
 		aux->catalog->clear_hw_interrupts(aux->catalog);
 	}
 
+#if defined(CONFIG_SECDP_BIGDATA)
+	if (aux->aux_error_num == DP_AUX_ERR_NONE)
+		secdp_bigdata_clr_error_cnt(ERR_AUX);
+	else
+		secdp_bigdata_inc_error_cnt(ERR_AUX);
+#endif
+
 	complete(&aux->comp);
 }
 
@@ -326,6 +371,13 @@ static void dp_aux_i2c_handler(struct dp_aux_private *aux)
 			aux->catalog->clear_hw_interrupts(aux->catalog);
 		}
 	}
+
+#if defined(CONFIG_SECDP_BIGDATA)
+	if (aux->aux_error_num == DP_AUX_ERR_NONE)
+		secdp_bigdata_clr_error_cnt(ERR_AUX);
+	else
+		secdp_bigdata_inc_error_cnt(ERR_AUX);
+#endif
 
 	complete(&aux->comp);
 }
@@ -361,6 +413,8 @@ static void dp_aux_reconfig(struct dp_aux *dp_aux)
 		return;
 	}
 
+	DP_ENTER("\n");
+
 	aux = container_of(dp_aux, struct dp_aux_private, dp_aux);
 
 	aux->catalog->update_aux_cfg(aux->catalog,
@@ -376,6 +430,8 @@ static void dp_aux_abort_transaction(struct dp_aux *dp_aux, bool abort)
 		DP_AUX_ERR(dp_aux, "invalid input\n");
 		return;
 	}
+
+	DP_ENTER("\n");
 
 	aux = container_of(dp_aux, struct dp_aux_private, dp_aux);
 
@@ -558,6 +614,20 @@ static ssize_t dp_aux_transfer(struct drm_dp_aux *drm_aux,
 
 	ret = dp_aux_cmd_fifo_tx(aux, msg);
 	if ((ret < 0) && !atomic_read(&aux->aborted)) {
+#if defined(CONFIG_SECDP)
+		if (!secdp_get_cable_status() || !secdp_get_hpd_status()) {
+			DP_INFO("hpd_low or cable_lost %d\n", ret);
+			/*
+			 * don't need to repeat aux.
+			 * exit loop in drm_dp_dpcd_access()
+			 */
+			msg->reply = aux->native ?
+				DP_AUX_NATIVE_REPLY_ACK : DP_AUX_I2C_REPLY_ACK;
+			ret = msg->size;
+			aux->retry_cnt = 0;
+			goto unlock_exit;
+		}
+#endif
 		aux->retry_cnt++;
 		if (!(aux->retry_cnt % retry_count))
 			aux->catalog->update_aux_cfg(aux->catalog,
@@ -661,6 +731,8 @@ static void dp_aux_init(struct dp_aux *dp_aux, struct dp_aux_cfg *aux_cfg)
 		return;
 	}
 
+	DP_ENTER("\n");
+
 	aux = container_of(dp_aux, struct dp_aux_private, dp_aux);
 
 	if (aux->enabled)
@@ -673,6 +745,8 @@ static void dp_aux_init(struct dp_aux *dp_aux, struct dp_aux_cfg *aux_cfg)
 	atomic_set(&aux->aborted, 0);
 	aux->retry_cnt = 0;
 	aux->enabled = true;
+
+	DP_LEAVE("\n");
 }
 
 static void dp_aux_deinit(struct dp_aux *dp_aux)
@@ -684,6 +758,8 @@ static void dp_aux_deinit(struct dp_aux *dp_aux)
 		return;
 	}
 
+	DP_ENTER("\n");
+
 	aux = container_of(dp_aux, struct dp_aux_private, dp_aux);
 
 	if (!aux->enabled)
@@ -692,6 +768,8 @@ static void dp_aux_deinit(struct dp_aux *dp_aux)
 	atomic_set(&aux->aborted, 1);
 	aux->catalog->enable(aux->catalog, false);
 	aux->enabled = false;
+
+	DP_LEAVE("\n");
 }
 
 static int dp_aux_register(struct dp_aux *dp_aux, struct drm_device *drm_dev)
@@ -876,10 +954,16 @@ end:
 }
 #endif
 
+#if !defined(CONFIG_SECDP)
 struct dp_aux *dp_aux_get(struct device *dev, struct dp_catalog_aux *catalog,
 		struct dp_parser *parser, struct device_node *aux_switch,
 		struct dp_aux_bridge *aux_bridge, void *ipc_log_context,
 		enum dp_aux_switch_type switch_type)
+#else
+struct dp_aux *dp_aux_get(struct device *dev, struct dp_catalog_aux *catalog,
+		struct dp_parser *parser, struct device_node *aux_switch,
+		struct dp_aux_bridge *aux_bridge, void *ipc_log_context, void *sec)
+#endif
 {
 	int rc = 0;
 	struct dp_aux_private *aux;
@@ -890,6 +974,8 @@ struct dp_aux *dp_aux_get(struct device *dev, struct dp_catalog_aux *catalog,
 		rc = -ENODEV;
 		goto error;
 	}
+
+	DP_ENTER("\n");
 
 	aux = devm_kzalloc(dev, sizeof(*aux), GFP_KERNEL);
 	if (!aux) {
@@ -904,7 +990,11 @@ struct dp_aux *dp_aux_get(struct device *dev, struct dp_catalog_aux *catalog,
 	aux->dev = dev;
 	aux->catalog = catalog;
 	aux->cfg = parser->aux_cfg;
+#if !defined(CONFIG_SECDP)
 	aux->aux_switch_node = aux_switch;
+#else
+	aux->sec = (struct secdp_misc *)sec;
+#endif
 	aux->aux_bridge = aux_bridge;
 	dp_aux = &aux->dp_aux;
 	aux->retry_cnt = 0;
@@ -920,8 +1010,14 @@ struct dp_aux *dp_aux_get(struct device *dev, struct dp_catalog_aux *catalog,
 	dp_aux->set_sim_mode = dp_aux_set_sim_mode;
 	dp_aux->ipc_log_context = ipc_log_context;
 
-	/*Condition to avoid allocating function pointers for aux bypass mode*/
-	if (switch_type != DP_AUX_SWITCH_BYPASS) {
+	bool use_switch_callbacks = true;
+
+#if !defined(CONFIG_SECDP)
+use_switch_callbacks = (switch_type != DP_AUX_SWITCH_BYPASS);
+#endif
+
+/*Condition to avoid allocating function pointers for aux bypass mode*/
+if (use_switch_callbacks) {
 #if IS_ENABLED(CONFIG_QCOM_DP_FSA4480_I2C)
 		if (switch_type == DP_AUX_SWITCH_FSA4480) {
 			dp_aux->switch_configure = dp_aux_configure_fsa_switch;

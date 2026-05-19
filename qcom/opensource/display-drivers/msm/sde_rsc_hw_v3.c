@@ -232,7 +232,13 @@ static int sde_rsc_mode2_entry_trigger(struct sde_rsc_priv *rsc)
 {
 	int rc;
 	int count, wrapper_status, ctrl2_status;
-	unsigned long reg;
+	unsigned long reg, prog_cnt;
+
+	if (rsc->dispcc_io.len) {
+		reg = dss_reg_r(&rsc->dispcc_io, DISP_CC_MDSS_CORE_GDSCR,
+					rsc->debug_mode);
+		SDE_EVT32(reg, 0x1111);
+	}
 
 	/* update qtimers to high during clk & video mode state */
 	if ((rsc->current_state == SDE_RSC_VID_STATE) ||
@@ -278,11 +284,19 @@ static int sde_rsc_mode2_entry_trigger(struct sde_rsc_priv *rsc)
 	for (count = MAX_CHECK_LOOPS; count > 0; count--) {
 		reg = dss_reg_r(&rsc->wrapper_io,
 				SDE_RSCC_PWR_CTRL, rsc->debug_mode);
+		prog_cnt = dss_reg_r(&rsc->drv_io,
+				SDE_RSCC_SEQ_PROGRAM_COUNTER, rsc->debug_mode);
+		SDE_EVT32(reg, prog_cnt, 0x2222);
 		if (test_bit(POWER_CTRL_BIT_12, &reg)) {
 			rc = 0;
 			break;
 		}
 		usleep_range(50, 100);
+	}
+	if (rsc->dispcc_io.len) {
+		reg = dss_reg_r(&rsc->dispcc_io, DISP_CC_MDSS_CORE_GDSCR,
+					rsc->debug_mode);
+		SDE_EVT32(reg, 0x2222);
 	}
 
 	return rc;
@@ -290,7 +304,7 @@ static int sde_rsc_mode2_entry_trigger(struct sde_rsc_priv *rsc)
 
 static void sde_rsc_reset_mode_0_1(struct sde_rsc_priv *rsc)
 {
-	u32 seq_busy, current_mode, curr_inst_addr;
+	u32 seq_busy, current_mode, curr_inst_addr, reg = 0xbad;
 
 	seq_busy = dss_reg_r(&rsc->drv_io, SDE_RSCC_SEQ_BUSY_DRV0,
 			rsc->debug_mode);
@@ -298,7 +312,10 @@ static void sde_rsc_reset_mode_0_1(struct sde_rsc_priv *rsc)
 			rsc->debug_mode);
 	curr_inst_addr = dss_reg_r(&rsc->drv_io, SDE_RSCC_SEQ_PROGRAM_COUNTER,
 			rsc->debug_mode);
-	SDE_EVT32(seq_busy, current_mode, curr_inst_addr);
+	if (rsc->dispcc_io.len)
+		reg = dss_reg_r(&rsc->dispcc_io, DISP_CC_MDSS_CORE_GDSCR,
+					rsc->debug_mode);
+	SDE_EVT32(seq_busy, current_mode, curr_inst_addr, reg);
 
 	if (seq_busy && (current_mode == SDE_RSC_MODE_0_VAL ||
 			current_mode == SDE_RSC_MODE_1_VAL)) {
@@ -369,8 +386,10 @@ static int sde_rsc_mode2_entry_v3(struct sde_rsc_priv *rsc)
 			sde_rsc_reset_mode_0_1(rsc);
 	}
 
-	if (rc)
+	if (rc) {
+		SDE_DBG_DUMP(0x3f, "panic");
 		goto end;
+	}
 
 	if ((rsc->current_state == SDE_RSC_VID_STATE) ||
 			(rsc->current_state == SDE_RSC_CLK_STATE)) {

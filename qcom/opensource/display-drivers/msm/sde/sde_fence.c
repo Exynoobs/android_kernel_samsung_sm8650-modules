@@ -891,6 +891,7 @@ static bool sde_fence_signaled(struct dma_fence *fence)
 	status = ((int)(fence->seqno - f->ctx->done_count) <= 0);
 	SDE_DEBUG("status:%d fence seq:%llu and timeline:%u\n",
 			status, fence->seqno, f->ctx->done_count);
+	SDE_EVT32(status, fence->seqno, f->ctx->done_count, f->ctx->commit_count, f->ctx->drm_id);
 	return status;
 }
 
@@ -1149,7 +1150,7 @@ int sde_fence_create(struct sde_fence_context *ctx, uint64_t *val,
 	SDE_DEBUG("fd:%d trigger:%d commit:%d offset:%d\n",
 			fd, trigger_value, ctx->commit_count, offset);
 
-	SDE_EVT32(ctx->drm_id, trigger_value, fd, hw_ctl ? hw_ctl->idx : 0);
+	SDE_EVT32(ctx->drm_id, trigger_value, fd, hw_ctl ? hw_ctl->idx : 0, offset);
 	rc = (fd >= 0) ? 0 : fd;
 
 	return rc;

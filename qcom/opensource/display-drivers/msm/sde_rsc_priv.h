@@ -212,6 +212,7 @@ enum sde_rsc_bw_delta {
  * profiling_en:	Flag for rsc lpm profiling counters, true=enabled
  * post_poms:		bool if a panel mode change occurred
  * bwi_update:		enum to indidate a bandwitdh vote change
+ * @dispcc_io:		display cc io data mapping
  */
 struct sde_rsc_priv {
 	u32 version;
@@ -224,6 +225,7 @@ struct sde_rsc_priv {
 	struct device *rpmh_dev;
 	struct dss_io_data drv_io;
 	struct dss_io_data wrapper_io;
+	struct dss_io_data dispcc_io;
 
 	struct list_head client_list;
 	struct list_head event_list;

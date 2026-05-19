@@ -27,6 +27,7 @@
 
 #define SDE_RSC_DRV_DBG_NAME		"sde_rsc_drv"
 #define SDE_RSC_WRAPPER_DBG_NAME	"sde_rsc_wrapper"
+#define DISP_CC_DBG_NAME		"disp_cc"
 
 #define SINGLE_TCS_EXECUTION_TIME_V1	1064000
 #define SINGLE_TCS_EXECUTION_TIME_V2	930000
@@ -957,6 +958,8 @@ int sde_rsc_client_state_update(struct sde_rsc_client *caller_client,
 			(caller_client == rsc->primary_client))
 		sde_rsc_timer_calculate(rsc, config, state);
 
+	if ((state == SDE_RSC_VID_STATE) && (rsc->version >= SDE_RSC_REV_3))
+		state = SDE_RSC_CLK_STATE;
 
 	caller_client->crtc_id = crtc_id;
 	caller_client->current_state = state;
@@ -1637,6 +1640,8 @@ static void sde_rsc_deinit(struct platform_device *pdev,
 		msm_dss_iounmap(&rsc->wrapper_io);
 	if (rsc->drv_io.base)
 		msm_dss_iounmap(&rsc->drv_io);
+	if (rsc->dispcc_io.base)
+		msm_dss_iounmap(&rsc->dispcc_io);
 
 	sde_power_resource_deinit(pdev, &rsc->phandle);
 	debugfs_remove_recursive(rsc->debugfs_root);
@@ -1701,6 +1706,9 @@ static int sde_rsc_bind(struct device *dev,
 			rsc->drv_io.len, msm_get_phys_addr(pdev, "drv"), SDE_DBG_RSC);
 	sde_dbg_reg_register_base(SDE_RSC_WRAPPER_DBG_NAME, rsc->wrapper_io.base,
 			rsc->wrapper_io.len, msm_get_phys_addr(pdev, "wrapper"), SDE_DBG_RSC);
+	if (rsc->dispcc_io.len)
+		sde_dbg_reg_register_base(DISP_CC_DBG_NAME, rsc->dispcc_io.base, rsc->dispcc_io.len,
+			msm_get_phys_addr(pdev, "dispcc"), SDE_DBG_RSC);
 
 	msm_register_vm_event(master, dev, &vm_event_ops, (void *)rsc);
 
@@ -1822,6 +1830,13 @@ static int sde_rsc_probe(struct platform_device *pdev)
 	if (ret) {
 		pr_err("sde rsc: drv io data mapping failed ret:%d\n", ret);
 		goto sde_rsc_fail;
+	}
+	ret = msm_dss_ioremap_byname(pdev, &rsc->dispcc_io, "dispcc");
+	if (ret) {
+		pr_err("sde rsc: drv io data mapping failed ret:%d\n", ret);
+		rsc->dispcc_io.base = ioremap(0xAF08000, 0x1010);
+		rsc->dispcc_io.len = 0x1010;
+	//	goto sde_rsc_fail;
 	}
 
 	rsc->fs = devm_regulator_get(&pdev->dev, "vdd");
