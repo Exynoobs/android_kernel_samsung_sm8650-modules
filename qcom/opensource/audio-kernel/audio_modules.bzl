@@ -476,3 +476,17 @@ audio_modules.register(
     config_option = "CONFIG_SND_SOC_WCD9378_SLAVE",
     srcs = ["wcd9378-slave.c"]
 )
+# >>>> TAS25XX MODULES <<<<
+audio_modules.register(
+    name = "tas25xx_dlkm",
+    path = ASOC_CODECS_PATH + "/tas25xx",
+    config_option = "CONFIG_SND_SOC_TAS25XX",
+    srcs = [
+	"src/tas25xx-codec.c",
+	"src/tas25xx-regmap.c",
+	"src/tas25xx.c",
+	"src/tas25xx-logic.c",
+	"src/tas25xx-misc.c",
+	"src/tas25xx-regbin-parser.c",
+    ]
+)
