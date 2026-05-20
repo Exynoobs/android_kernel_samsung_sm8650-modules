@@ -13,15 +13,14 @@ LOCAL_PATH := $(call my-dir)
 # Path to DLKM make scripts
 DLKM_DIR := $(TOP)/device/qcom/common/dlkm
 
-LOCAL_MODULE_DDK_BUILD := true
+#LOCAL_MODULE_DDK_BUILD := true
 
-LOCAL_MODULE_DDK_SUBTARGET_REGEX := "camera.*"
-ifeq ($(TARGET_BOARD_PLATFORM), volcano)
-  LOCAL_MODULE_DDK_SUBTARGET_REGEX := "$(TARGET_BOARD_PLATFORM)_camera.*"
+ifneq ($(PROJECT_NAME),)
+LOCAL_MODULE_DDK_EXTRA_ARGS := "--//vendor/qcom/opensource/camera-kernel:project_name=$(PROJECT_NAME)"
 endif
 
 # List of board platforms for which MMRM driver API should be enabled
-MMRM_BOARDS := taro parrot kalama pineapple crow volcano
+MMRM_BOARDS := taro parrot kalama pineapple
 
 # List of board platforms for which Synx V2 vendor driver API should be enabled
 SYNX_VENDOR_BOARDS := pineapple

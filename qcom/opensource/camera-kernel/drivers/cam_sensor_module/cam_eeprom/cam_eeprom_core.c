@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -13,6 +13,12 @@
 #include "cam_debug_util.h"
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
+#include "cam_hw_bigdata.h"
+
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+#include "cam_sec_eeprom_core.h"
+#define CAM_EEPROM_DBG  1
+#endif
 
 #define MAX_READ_SIZE  0x7FFFF
 
@@ -48,7 +54,7 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 			eb_info->i2c_info.slave_addr = emap[j].saddr;
 			rc = cam_eeprom_update_i2c_info(e_ctrl,
 				&eb_info->i2c_info);
-			if (rc) {
+			if (rc < 0) {
 				CAM_ERR(CAM_EEPROM,
 					"failed: to update i2c info rc %d",
 					rc);
@@ -66,7 +72,7 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 			i2c_reg_settings.reg_setting = &i2c_reg_array;
 			rc = camera_io_dev_write(&e_ctrl->io_master_info,
 				&i2c_reg_settings);
-			if (rc) {
+			if (rc < 0) {
 				CAM_ERR(CAM_EEPROM, "page write failed rc %d",
 					rc);
 				return rc;
@@ -83,7 +89,7 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 			i2c_reg_settings.reg_setting = &i2c_reg_array;
 			rc = camera_io_dev_write(&e_ctrl->io_master_info,
 				&i2c_reg_settings);
-			if (rc) {
+			if (rc < 0) {
 				CAM_ERR(CAM_EEPROM, "page enable failed rc %d",
 					rc);
 				return rc;
@@ -96,7 +102,7 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 				0, emap[j].poll.addr_type,
 				emap[j].poll.data_type,
 				emap[j].poll.delay);
-			if (rc) {
+			if (rc < 0) {
 				CAM_ERR(CAM_EEPROM, "poll failed rc %d",
 					rc);
 				return rc;
@@ -104,6 +110,45 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 		}
 
 		if (emap[j].mem.valid_size) {
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+			uint32_t addr = 0, size = 0, read_size = 0;
+
+			size = emap[j].mem.valid_size;
+			addr = emap[j].mem.addr;
+			memptr = block->mapdata + addr;
+
+			CAM_DBG(CAM_EEPROM, "[%d / %d] memptr = %pK, addr = 0x%X, size = 0x%X, subdev = %d",
+				j, block->num_map, memptr, emap[j].mem.addr, emap[j].mem.valid_size, e_ctrl->soc_info.index);
+
+			CAM_DBG(CAM_EEPROM, "addr_type = %d, data_type = %d, device_type = %d",
+				emap[j].mem.addr_type, emap[j].mem.data_type, e_ctrl->eeprom_device_type);
+			if (emap[j].mem.data_type == 0) {
+				CAM_DBG(CAM_EEPROM,
+					"skipping read as data_type 0, skipped:%d",
+					read_size);
+				continue;
+			}
+
+			while(size > 0) {
+				read_size = size;
+				if (size > I2C_REG_DATA_MAX) {
+					read_size = I2C_REG_DATA_MAX;
+				}
+				rc = camera_io_dev_read_seq(&e_ctrl->io_master_info,
+					addr, memptr,
+					emap[j].mem.addr_type,
+					emap[j].mem.data_type,
+					read_size);
+				if (rc < 0) {
+					CAM_ERR(CAM_EEPROM, "read failed rc %d",
+						rc);
+					return rc;
+				}
+				size -= read_size;
+				addr += read_size;
+				memptr += read_size;
+			}
+#else
 			rc = camera_io_dev_read_seq(&e_ctrl->io_master_info,
 				emap[j].mem.addr, memptr,
 				emap[j].mem.addr_type,
@@ -115,6 +160,8 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 				return rc;
 			}
 			memptr += emap[j].mem.valid_size;
+#endif
+
 		}
 
 		if (emap[j].pageen.valid_size) {
@@ -127,7 +174,7 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 			i2c_reg_settings.reg_setting = &i2c_reg_array;
 			rc = camera_io_dev_write(&e_ctrl->io_master_info,
 				&i2c_reg_settings);
-			if (rc) {
+			if (rc < 0) {
 				CAM_ERR(CAM_EEPROM,
 					"page disable failed rc %d",
 					rc);
@@ -191,6 +238,10 @@ static int cam_eeprom_power_up(struct cam_eeprom_ctrl_t *e_ctrl,
 		goto cci_failure;
 	}
 
+#if defined(CONFIG_SAMSUNG_CAMERA)
+	usleep_range(5000, 5010);
+#endif
+
 	return rc;
 cci_failure:
 	if (cam_sensor_util_power_down(power_info, soc_info))
@@ -234,6 +285,10 @@ static int cam_eeprom_power_down(struct cam_eeprom_ctrl_t *e_ctrl)
 
 	camera_io_release(&(e_ctrl->io_master_info));
 
+#if defined(CONFIG_SAMSUNG_CAMERA)
+	msleep(40);
+#endif
+
 	return rc;
 }
 
@@ -276,6 +331,12 @@ int32_t cam_eeprom_parse_read_memory_map(struct device_node *of_node,
 	struct cam_eeprom_soc_private  *soc_private;
 	struct cam_sensor_power_ctrl_t *power_info;
 
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+	int i;
+	int normal_crc_value = 0;
+#endif
+
+
 	if (!e_ctrl) {
 		CAM_ERR(CAM_EEPROM, "failed: e_ctrl is NULL");
 		return -EINVAL;
@@ -304,11 +365,47 @@ int32_t cam_eeprom_parse_read_memory_map(struct device_node *of_node,
 			goto power_down;
 		}
 	}
+
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+	normal_crc_value = 0;
+	for (i = 0; i < e_ctrl->cal_data.num_map>>1; i++)
+		normal_crc_value |= (1 << i);
+
+	e_ctrl->camera_normal_cal_crc = normal_crc_value;
+	CAM_INFO(CAM_EEPROM, "num_map = %d, CAMERA_NORMAL_CAL_CRC = 0x%X",
+		e_ctrl->cal_data.num_map, e_ctrl->camera_normal_cal_crc);
+#endif
+
 	rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
 	if (rc) {
 		CAM_ERR(CAM_EEPROM, "read_eeprom_memory failed");
 		goto power_down;
 	}
+
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+	e_ctrl->is_supported |= cam_sec_eeprom_match_crc(&e_ctrl->cal_data, e_ctrl->soc_info.index);
+
+	if (e_ctrl->is_supported != normal_crc_value)
+		CAM_ERR(CAM_EEPROM, "Any CRC values at F-ROM are not matched.");
+	else
+		CAM_INFO(CAM_EEPROM, "All CRC values are matched.");
+
+	rc = cam_sec_eeprom_update_module_info(e_ctrl);
+	if (rc < 0) {
+		CAM_ERR(CAM_EEPROM, "cam_sec_eeprom_update_module_info failed");
+		goto power_down;
+	}
+
+#ifdef CAM_EEPROM_DBG_DUMP
+	if (e_ctrl->soc_info.index == 1 || e_ctrl->soc_info.index == 8 ) {
+		rc = cam_sec_eeprom_dump(e_ctrl->soc_info.index, e_ctrl->cal_data.mapdata, 0x0000, 0x7DF);
+	}
+	else if (e_ctrl->soc_info.index == 2) {
+		rc = cam_sec_eeprom_dump(e_ctrl->soc_info.index, e_ctrl->cal_data.mapdata, 0x0000, 0x7DF);
+	}
+#endif
+#endif
+
 
 	rc = cam_eeprom_power_down(e_ctrl);
 	if (rc)
@@ -425,7 +522,6 @@ static int32_t cam_eeprom_parse_memory_map(
 	int32_t                            rc = 0;
 	int32_t                            cnt = 0;
 	int32_t                            processed_size = 0;
-	int32_t                            payload_count;
 	uint8_t                            generic_op_code;
 	struct cam_eeprom_memory_map_t    *map = data->map;
 	struct common_header              *cmm_hdr =
@@ -455,25 +551,24 @@ static int32_t cam_eeprom_parse_memory_map(
 	switch (cmm_hdr->cmd_type) {
 	case CAMERA_SENSOR_CMD_TYPE_I2C_RNDM_WR:
 		i2c_random_wr = (struct cam_cmd_i2c_random_wr *)cmd_buf;
-		payload_count = i2c_random_wr->header.count;
 
-		if (payload_count == 0 ||
-		    payload_count >= MSM_EEPROM_MAX_MEM_MAP_CNT ||
+		if (i2c_random_wr->header.count == 0 ||
+		    i2c_random_wr->header.count >= MSM_EEPROM_MAX_MEM_MAP_CNT ||
 		    (size_t)*num_map >= ((MSM_EEPROM_MAX_MEM_MAP_CNT *
 				MSM_EEPROM_MEMORY_MAP_MAX_SIZE) -
-				payload_count)) {
+				i2c_random_wr->header.count)) {
 			CAM_ERR(CAM_EEPROM, "OOB Error");
 			return -EINVAL;
 		}
 		cmd_length_in_bytes   = sizeof(struct cam_cmd_i2c_random_wr) +
-			((payload_count - 1) *
+			((i2c_random_wr->header.count - 1) *
 			sizeof(struct i2c_random_wr_payload));
 
 		if (cmd_length_in_bytes > remain_buf_len) {
 			CAM_ERR(CAM_EEPROM, "Not enough buffer remaining");
 			return -EINVAL;
 		}
-		for (cnt = 0; cnt < (payload_count);
+		for (cnt = 0; cnt < (i2c_random_wr->header.count);
 			cnt++) {
 			map[*num_map + cnt].page.addr =
 				i2c_random_wr->random_wr_payload[cnt].reg_addr;
@@ -486,16 +581,15 @@ static int32_t cam_eeprom_parse_memory_map(
 			map[*num_map + cnt].page.valid_size = 1;
 		}
 
-		*num_map += (payload_count - 1);
+		*num_map += (i2c_random_wr->header.count - 1);
 		processed_size +=
 			cmd_length_in_bytes;
 		break;
 	case CAMERA_SENSOR_CMD_TYPE_I2C_CONT_RD:
 		i2c_cont_rd = (struct cam_cmd_i2c_continuous_rd *)cmd_buf;
 		cmd_length_in_bytes = sizeof(struct cam_cmd_i2c_continuous_rd);
-		payload_count = i2c_cont_rd->header.count;
 
-		if (payload_count >= U32_MAX - data->num_data) {
+		if (i2c_cont_rd->header.count >= U32_MAX - data->num_data) {
 			CAM_ERR(CAM_EEPROM,
 				"int overflow on eeprom memory block");
 			return -EINVAL;
@@ -504,7 +598,7 @@ static int32_t cam_eeprom_parse_memory_map(
 		map[*num_map].mem.addr_type = i2c_cont_rd->header.addr_type;
 		map[*num_map].mem.data_type = i2c_cont_rd->header.data_type;
 		map[*num_map].mem.valid_size =
-			payload_count;
+			i2c_cont_rd->header.count;
 		processed_size +=
 			cmd_length_in_bytes;
 		data->num_data += map[*num_map].mem.valid_size;
@@ -1090,8 +1184,6 @@ static int32_t cam_eeprom_get_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,
 {
 	struct cam_buf_io_cfg *io_cfg;
 	uint32_t              i = 0;
-	size_t                plane_offset;
-	int32_t               mem_handle;
 	int                   rc = 0;
 	uintptr_t              buf_addr;
 	size_t                buf_size;
@@ -1101,8 +1193,6 @@ static int32_t cam_eeprom_get_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,
 	io_cfg = (struct cam_buf_io_cfg *) ((uint8_t *)
 		&csl_packet->payload +
 		csl_packet->io_configs_offset);
-	plane_offset = io_cfg->offsets[0];
-	mem_handle   = io_cfg->mem_handle[0];
 
 	CAM_DBG(CAM_EEPROM, "number of IO configs: %d:",
 		csl_packet->num_io_configs);
@@ -1110,21 +1200,21 @@ static int32_t cam_eeprom_get_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,
 	for (i = 0; i < csl_packet->num_io_configs; i++) {
 		CAM_DBG(CAM_EEPROM, "Direction: %d:", io_cfg->direction);
 		if (io_cfg->direction == CAM_BUF_OUTPUT) {
-			rc = cam_mem_get_cpu_buf(mem_handle,
+			rc = cam_mem_get_cpu_buf(io_cfg->mem_handle[0],
 				&buf_addr, &buf_size);
 			if (rc) {
 				CAM_ERR(CAM_EEPROM, "Fail in get buffer: %d",
 					rc);
 				return rc;
 			}
-			if (buf_size <= plane_offset) {
+			if (buf_size <= io_cfg->offsets[0]) {
 				CAM_ERR(CAM_EEPROM, "Not enough buffer");
-				cam_mem_put_cpu_buf(mem_handle);
+				cam_mem_put_cpu_buf(io_cfg->mem_handle[0]);
 				rc = -EINVAL;
 				return rc;
 			}
 
-			remain_len = buf_size - plane_offset;
+			remain_len = buf_size - io_cfg->offsets[0];
 			CAM_DBG(CAM_EEPROM, "buf_addr : %pK, buf_size : %zu\n",
 				(void *)buf_addr, buf_size);
 
@@ -1132,16 +1222,16 @@ static int32_t cam_eeprom_get_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,
 			if (!read_buffer) {
 				CAM_ERR(CAM_EEPROM,
 					"invalid buffer to copy data");
-				cam_mem_put_cpu_buf(mem_handle);
+				cam_mem_put_cpu_buf(io_cfg->mem_handle[0]);
 				rc = -EINVAL;
 				return rc;
 			}
-			read_buffer += plane_offset;
+			read_buffer += io_cfg->offsets[0];
 
 			if (remain_len < e_ctrl->cal_data.num_data) {
 				CAM_ERR(CAM_EEPROM,
 					"failed to copy, Invalid size");
-				cam_mem_put_cpu_buf(mem_handle);
+				cam_mem_put_cpu_buf(io_cfg->mem_handle[0]);
 				rc = -EINVAL;
 				return rc;
 			}
@@ -1150,7 +1240,7 @@ static int32_t cam_eeprom_get_cal_data(struct cam_eeprom_ctrl_t *e_ctrl,
 				e_ctrl->cal_data.num_data);
 			memcpy(read_buffer, e_ctrl->cal_data.mapdata,
 					e_ctrl->cal_data.num_data);
-			cam_mem_put_cpu_buf(mem_handle);
+			cam_mem_put_cpu_buf(io_cfg->mem_handle[0]);
 		} else {
 			CAM_ERR(CAM_EEPROM, "Invalid direction");
 			rc = -EINVAL;
@@ -1227,14 +1317,19 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 	int32_t                         rc = 0;
 	struct cam_control             *ioctl_ctrl = NULL;
 	struct cam_config_dev_cmd       dev_config;
-	uintptr_t                       generic_pkt_addr;
+	uintptr_t                        generic_pkt_addr;
 	size_t                          pkt_len;
 	size_t                          remain_len = 0;
 	struct cam_packet              *csl_packet = NULL;
-	struct cam_packet              *csl_packet_u = NULL;
 	struct cam_eeprom_soc_private  *soc_private =
 		(struct cam_eeprom_soc_private *)e_ctrl->soc_info.soc_private;
 	struct cam_sensor_power_ctrl_t *power_info = &soc_private->power_info;
+
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+	uint8_t                         crc_check_retry_cnt = 0;
+	int i;
+	int normal_crc_value = 0;
+#endif
 
 	ioctl_ctrl = (struct cam_control *)arg;
 
@@ -1263,12 +1358,15 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 	}
 
 	remain_len -= (size_t)dev_config.offset;
-	csl_packet_u = (struct cam_packet *)
+	csl_packet = (struct cam_packet *)
 		(generic_pkt_addr + (uint32_t)dev_config.offset);
-	rc = cam_packet_util_copy_pkt_to_kmd(csl_packet_u, &csl_packet, remain_len);
-	if (rc) {
-		CAM_ERR(CAM_EEPROM, "Copying packet to KMD failed");
-		goto put_ref;
+
+	if (cam_packet_util_validate_packet(csl_packet,
+		remain_len)) {
+		CAM_ERR(CAM_EEPROM, "Invalid packet params");
+		cam_mem_put_cpu_buf(dev_config.packet_handle);
+		rc = -EINVAL;
+		return rc;
 	}
 
 	switch (csl_packet->header.op_code & 0xFFFFFF) {
@@ -1278,7 +1376,8 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 					e_ctrl->soc_info.dev->of_node, e_ctrl);
 			if (rc < 0) {
 				CAM_ERR(CAM_EEPROM, "Failed: rc : %d", rc);
-				goto end;
+				cam_mem_put_cpu_buf(dev_config.packet_handle);
+				return rc;
 			}
 			rc = cam_eeprom_get_cal_data(e_ctrl, csl_packet);
 			if (rc)
@@ -1286,6 +1385,8 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 
 			vfree(e_ctrl->cal_data.mapdata);
 			vfree(e_ctrl->cal_data.map);
+			e_ctrl->cal_data.mapdata = NULL;
+			e_ctrl->cal_data.map = NULL;
 			e_ctrl->cal_data.num_data = 0;
 			e_ctrl->cal_data.num_map = 0;
 			CAM_DBG(CAM_EEPROM,
@@ -1296,8 +1397,27 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 		if (rc) {
 			CAM_ERR(CAM_EEPROM,
 				"Failed in parsing the pkt");
-			goto end;
+			cam_mem_put_cpu_buf(dev_config.packet_handle);
+			return rc;
 		}
+
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+		if ((e_ctrl->cal_data.num_map == 0) &&
+			(e_ctrl->cal_data.map != NULL)) {
+			vfree(e_ctrl->cal_data.map);
+			e_ctrl->cal_data.map = NULL;
+			CAM_INFO(CAM_EEPROM, "No read settings privided");
+			return rc;
+		}
+
+		e_ctrl->cal_data.num_data = cam_sec_eeprom_calc_calmap_size(e_ctrl);
+
+		if (e_ctrl->cal_data.num_data == 0) {
+			rc = -ENOMEM;
+			CAM_ERR(CAM_EEPROM, "failed");
+			goto error;
+		}
+#endif
 
 		e_ctrl->cal_data.mapdata =
 			vzalloc(e_ctrl->cal_data.num_data);
@@ -1316,6 +1436,9 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 			}
 		}
 
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+eeropm_crc_check :
+#endif
 		rc = cam_eeprom_power_up(e_ctrl,
 			&soc_private->power_info);
 		if (rc) {
@@ -1324,12 +1447,145 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 		}
 
 		e_ctrl->cam_eeprom_state = CAM_EEPROM_CONFIG;
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+		normal_crc_value = 0;
+		for (i = 0; i < e_ctrl->cal_data.num_map>>1; i++)
+			normal_crc_value |= (1 << i);
+
+		e_ctrl->camera_normal_cal_crc = normal_crc_value;
+		CAM_INFO(CAM_EEPROM, "num_map = %d, CAMERA_NORMAL_CAL_CRC = 0x%X",
+			e_ctrl->cal_data.num_map, e_ctrl->camera_normal_cal_crc);
+#endif
+#if defined(CONFIG_SEC_GTS10U_PROJECT)
+		if (e_ctrl->soc_info.index == 2){
+			CAM_ERR(CAM_EEPROM, "HI847 REAR UW");
+			rc = cam_otp_hi847_read_memory(e_ctrl, &e_ctrl->cal_data);
+		}
+		else {
+			rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
+		}
+#elif defined(CONFIG_SEC_GTS10P_PROJECT)
+		if (e_ctrl->soc_info.index == 1){
+			CAM_INFO(CAM_EEPROM, "HI1337 FRONT");
+			rc = cam_otp_hi1337_read_memory(e_ctrl, &e_ctrl->cal_data);
+		}
+		else if (e_ctrl->soc_info.index == 2){
+			CAM_ERR(CAM_EEPROM, "HI847 REAR UW");
+			rc = cam_otp_hi847_read_memory(e_ctrl, &e_ctrl->cal_data);
+		}
+		else if (e_ctrl->soc_info.index == 12){
+			CAM_INFO(CAM_EEPROM, "HI1337 FRONT FULL");
+			rc = cam_otp_hi1337_read_memory(e_ctrl, &e_ctrl->cal_data);
+		}
+		else {
+			rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
+		}
+#else
 		rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
+#endif
 		if (rc) {
 			CAM_ERR(CAM_EEPROM,
 				"read_eeprom_memory failed");
+			hw_bigdata_i2c_from_eeprom(e_ctrl);
+
+#if defined(CONFIG_SAMSUNG_CAMERA)
+			CAM_ERR(CAM_EEPROM, "Retry to read F-ROM");
+			rc = cam_eeprom_power_down(e_ctrl);
+			if (rc) {
+				CAM_ERR(CAM_EEPROM, "failed power down rc %d", rc);
+				goto memdata_free;
+			}
+
+			usleep_range(10*1000, 11*1000);
+
+			rc = cam_eeprom_power_up(e_ctrl,
+				&soc_private->power_info);
+			if (rc) {
+				CAM_ERR(CAM_EEPROM, "failed power up rc %d", rc);
+				goto memdata_free;
+			}
+
+			rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
+			if (rc) {
+				CAM_ERR(CAM_EEPROM,
+					"read_eeprom_memory failed (retry)");
+				hw_bigdata_i2c_from_eeprom(e_ctrl);
+				cam_sec_eeprom_reset_module_info(e_ctrl);
+
+				goto power_down;
+			}
+#else
 			goto power_down;
+#endif
 		}
+
+#if defined(CONFIG_CAMERA_SYSFS_V2)
+		if (1 < e_ctrl->cal_data.num_map) {
+			if (crc_check_retry_cnt == 0) {
+				rc = cam_sec_eeprom_get_customInfo(e_ctrl, csl_packet);
+				if (rc < 0) {
+					CAM_INFO(CAM_EEPROM, "cam_sec_eeprom_get_customInfo failed");
+				}
+			}
+
+			e_ctrl->is_supported |= cam_sec_eeprom_match_crc(&e_ctrl->cal_data,
+				e_ctrl->soc_info.index);
+
+			if (e_ctrl->is_supported != normal_crc_value) {
+				CAM_ERR(CAM_EEPROM, "Any CRC values at F-ROM are not matched.");
+				hw_bigdata_crc_from_eeprom(e_ctrl);
+				if (crc_check_retry_cnt < 10) {
+					crc_check_retry_cnt++;
+					CAM_ERR(CAM_EEPROM, "Retry to read F-ROM : %d", crc_check_retry_cnt);
+					cam_eeprom_power_down(e_ctrl);
+					goto eeropm_crc_check;
+
+				}
+			} else {
+				CAM_INFO(CAM_EEPROM, "All CRC values are matched.");
+				crc_check_retry_cnt = 0;
+			}
+
+#if defined(CONFIG_CAMERA_HW_ERROR_DETECT)
+			if (crc_check_retry_cnt > 0) {
+				if (e_ctrl->soc_info.index == SEC_WIDE_SENSOR) {
+					sprintf(retry_cnt[INDEX_REAR], "%d\n", crc_check_retry_cnt);
+				} else if (e_ctrl->soc_info.index == SEC_ULTRA_WIDE_SENSOR) {
+					sprintf(retry_cnt[INDEX_REAR2], "%d\n", crc_check_retry_cnt);
+				} else if (e_ctrl->soc_info.index == SEC_TELE_SENSOR) {
+					sprintf(retry_cnt[INDEX_REAR3], "%d\n", crc_check_retry_cnt);
+				} else if (e_ctrl->soc_info.index == SEC_TELE2_SENSOR) {
+					sprintf(retry_cnt[INDEX_REAR4], "%d\n", crc_check_retry_cnt);
+				} else if (e_ctrl->soc_info.index == SEC_FRONT_SENSOR) {
+					sprintf(retry_cnt[INDEX_FRONT], "%d\n", crc_check_retry_cnt);
+				}
+			}
+#endif
+
+			rc = cam_sec_eeprom_update_module_info(e_ctrl);
+			if (rc < 0) {
+				CAM_ERR(CAM_EEPROM, "cam_sec_eeprom_update_module_info failed");
+				goto power_down;
+			}
+
+#ifdef CAM_EEPROM_DBG_DUMP
+			if (e_ctrl->soc_info.index == 1 || e_ctrl->soc_info.index == 8)
+				rc = cam_sec_eeprom_dump(e_ctrl->soc_info.index,
+					e_ctrl->cal_data.mapdata, 0x0, 0x7DF);
+			else if (e_ctrl->soc_info.index == 2)
+				rc = cam_sec_eeprom_dump(e_ctrl->soc_info.index,
+					e_ctrl->cal_data.mapdata, 0x0, 0x7DF);
+#endif
+		} else if (e_ctrl->cal_data.num_map == 1 &&
+			e_ctrl->cal_data.num_data == FROM_REAR_HEADER_SIZE) {
+			// run this on eebin check
+			rc = cam_sec_eeprom_get_phone_ver(e_ctrl, csl_packet);
+			if (rc < 0) {
+				CAM_ERR(CAM_EEPROM, "cam_sec_eeprom_get_phone_ver failed");
+				goto power_down;
+			}
+		}
+#endif
 
 		rc = cam_eeprom_get_cal_data(e_ctrl, csl_packet);
 		if (rc)
@@ -1339,6 +1595,8 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 		e_ctrl->cam_eeprom_state = CAM_EEPROM_ACQUIRE;
 		vfree(e_ctrl->cal_data.mapdata);
 		vfree(e_ctrl->cal_data.map);
+		e_ctrl->cal_data.mapdata = NULL;
+		e_ctrl->cal_data.map = NULL;
 		kfree(power_info->power_setting);
 		kfree(power_info->power_down_setting);
 		power_info->power_setting = NULL;
@@ -1357,7 +1615,8 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 			csl_packet, e_ctrl);
 		if (rc < 0) {
 			CAM_ERR(CAM_EEPROM, "Failed: rc : %d", rc);
-			goto end;
+			cam_mem_put_cpu_buf(dev_config.packet_handle);
+			return rc;
 		}
 
 		rc = cam_eeprom_power_up(e_ctrl,
@@ -1378,7 +1637,8 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 			e_ctrl->eebin_info.size);
 		if (rc < 0) {
 			CAM_ERR(CAM_EEPROM, "Failed in erase : %d", rc);
-			goto end;
+			cam_mem_put_cpu_buf(dev_config.packet_handle);
+			return rc;
 		}
 
 		/* Buffer time margin */
@@ -1387,7 +1647,8 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 		rc = cam_eeprom_write(e_ctrl);
 		if (rc < 0) {
 			CAM_ERR(CAM_EEPROM, "Failed: rc : %d", rc);
-			goto end;
+			cam_mem_put_cpu_buf(dev_config.packet_handle);
+			return rc;
 		}
 
 		rc = cam_eeprom_power_down(e_ctrl);
@@ -1404,9 +1665,6 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 		rc = -EINVAL;
 		break;
 	}
-end:
-	cam_common_mem_free(csl_packet);
-put_ref:
 	cam_mem_put_cpu_buf(dev_config.packet_handle);
 	return rc;
 power_down:
@@ -1422,8 +1680,9 @@ error:
 	vfree(e_ctrl->cal_data.map);
 	e_ctrl->cal_data.num_data = 0;
 	e_ctrl->cal_data.num_map = 0;
+	e_ctrl->cal_data.mapdata = NULL;
+	e_ctrl->cal_data.map = NULL;
 	e_ctrl->cam_eeprom_state = CAM_EEPROM_ACQUIRE;
-	cam_common_mem_free(csl_packet);
 	return rc;
 }
 

@@ -25,6 +25,9 @@
 #include <cam_sensor_io.h>
 #include "cam_debug_util.h"
 #include "cam_context.h"
+#if defined(CONFIG_SENSOR_RETENTION)
+#include "cam_sensor_retention.h"
+#endif
 
 #define NUM_MASTERS 2
 #define NUM_QUEUES 2
@@ -115,7 +118,6 @@ struct cam_sensor_dev_res_info {
  * @is_stopped_by_user: Indicate if sensor has been stopped by userland
  * @stream_off_after_eof: Indicates if sensor needs to stream off after eof
  * @is_res_info_updated: Indicate if resolution info is updated
- * @hw_no_ops: To determine whether HW operations need to be disabled
  */
 struct cam_sensor_ctrl_t {
 	char                           device_name[CAM_CTX_DEV_NAME_MAX_LENGTH];
@@ -153,7 +155,28 @@ struct cam_sensor_ctrl_t {
 	bool                           is_stopped_by_user;
 	bool                           stream_off_after_eof;
 	bool                           is_res_info_updated;
-	bool                           hw_no_ops;
+#if defined(CONFIG_SAMSUNG_DEBUG_SENSOR_TIMING)
+	uint32_t                       camera_shooting_mode;
+#endif
+#if defined(CONFIG_SAMSUNG_DEBUG_SENSOR_I2C)
+	bool                           is_bubble_packet;
+#endif
+#if defined(CONFIG_CAMERA_ADAPTIVE_MIPI)
+	u32 mipi_clock_index_new;
+	u32 mipi_clock_index_cur;
+	const struct cam_mipi_sensor_mode *mipi_info;
+	uint8_t sensor_mode;
+#endif
+#if defined (CONFIG_CAMERA_FRAME_CNT_DBG)
+	struct task_struct *sensor_thread;
+	bool is_thread_started;
+#endif
+#if defined(CONFIG_SENSOR_RETENTION)
+	bool                               retention_stream_on;
+	bool                               retention_checksum;
+	struct cam_sensor_retention_info   retention_info;
+	int32_t                            retention_reserved[2];
+#endif
 };
 
 /**

@@ -2690,6 +2690,12 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 			goto err_detach;
 		}
 
+	        if (!table->sgl) {
+		        rc = -EINVAL;
+		        CAM_ERR(CAM_SMMU, "Error: table sgl is null");
+		        goto err_unmap_sg;
+	        }
+
 		domain = iommu_cb_set.cb_info[idx].domain;
 		if (!domain) {
 			CAM_ERR(CAM_SMMU, "CB has no domain set");
@@ -2752,6 +2758,14 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 	}
 
 	CAM_DBG(CAM_SMMU,
+		"DMA buf: %pK, device: %pK, attach: %pK, table: %pK",
+		(void *)buf,
+		(void *)iommu_cb_set.cb_info[idx].dev,
+		(void *)attach, (void *)table);
+	CAM_DBG(CAM_SMMU, "table sgl: %pK, rc: %d, dma_address: 0x%x",
+		(void *)table->sgl, rc,
+		(unsigned int)table->sgl->dma_address);
+	CAM_DBG(CAM_SMMU,
 		"iova=%pK, region_id=%d, paddr=0x%llx, len=%zu, dma_map_attrs=%d",
 		iova, region_id, *paddr_ptr, *len_ptr, attach->dma_map_attrs);
 
@@ -2762,20 +2776,6 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 			*len_ptr, microsec);
 	}
 
-	if (table->sgl) {
-		CAM_DBG(CAM_SMMU,
-			"DMA buf: %pK, device: %pK, attach: %pK, table: %pK",
-			(void *)buf,
-			(void *)iommu_cb_set.cb_info[idx].dev,
-			(void *)attach, (void *)table);
-		CAM_DBG(CAM_SMMU, "table sgl: %pK, rc: %d, dma_address: 0x%x",
-			(void *)table->sgl, rc,
-			(unsigned int)table->sgl->dma_address);
-	} else {
-		rc = -EINVAL;
-		CAM_ERR(CAM_SMMU, "Error: table sgl is null");
-		goto err_unmap_sg;
-	}
 
 	/* fill up mapping_info */
 	*mapping_info = kzalloc(sizeof(struct cam_dma_buff_info), GFP_KERNEL);
@@ -4445,7 +4445,8 @@ static void cam_smmu_release_cb(struct platform_device *pdev)
 	for (i = 0; i < iommu_cb_set.cb_num; i++)
 		cam_smmu_deinit_cb(&iommu_cb_set.cb_info[i]);
 
-	devm_kfree(&pdev->dev, iommu_cb_set.cb_info);
+	kvfree(iommu_cb_set.cb_info);
+	iommu_cb_set.cb_info = NULL;
 	iommu_cb_set.cb_num = 0;
 }
 
@@ -4573,9 +4574,8 @@ static int cam_alloc_smmu_context_banks(struct device *dev)
 	}
 
 	/* allocate memory for the context banks */
-	iommu_cb_set.cb_info = devm_kzalloc(dev,
-		iommu_cb_set.cb_num * sizeof(struct cam_context_bank_info),
-		GFP_KERNEL);
+	iommu_cb_set.cb_info = kvzalloc(
+		iommu_cb_set.cb_num * sizeof(struct cam_context_bank_info), GFP_KERNEL);
 
 	if (!iommu_cb_set.cb_info) {
 		CAM_ERR(CAM_SMMU, "Error: cannot allocate context banks");

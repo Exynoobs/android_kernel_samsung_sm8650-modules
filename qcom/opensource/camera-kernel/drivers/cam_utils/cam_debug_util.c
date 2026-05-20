@@ -28,6 +28,11 @@ module_param(debug_drv, uint, 0644);
 uint debug_bypass_drivers;
 module_param(debug_bypass_drivers, uint, 0644);
 
+#if defined(CONFIG_SAMSUNG_DEBUG_SENSOR_I2C)
+char debug_sensor_name[20];
+module_param_string(debug_sensor_name, debug_sensor_name, sizeof(debug_sensor_name), 0644);
+#endif
+
 struct camera_debug_settings cam_debug;
 
 struct dentry *cam_debugfs_root;
@@ -294,5 +299,6 @@ void cam_print_log(int type, int module, int tag, const char *func,
 	__cam_print_log(type, __CAM_LOG_FMT,
 		CAM_LOG_TAG_NAME(tag), CAM_DBG_MOD_NAME(module), func,
 		line, buf);
+	vprintk("\n\0", args);
 	va_end(args);
 }

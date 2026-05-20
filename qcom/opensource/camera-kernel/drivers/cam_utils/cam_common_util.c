@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2025, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/string.h>
@@ -20,6 +20,9 @@
 #include <soc/qcom/minidump.h>
 static struct cam_common_mini_dump_dev_info g_minidump_dev_info;
 #endif
+#if IS_ENABLED(CONFIG_SEC_ABC)
+#include <linux/sti/abc_common.h>
+#endif
 
 #define CAM_PRESIL_POLL_DELAY 20
 
@@ -30,6 +33,58 @@ module_param(timeout_multiplier, uint, 0644);
 typedef int (*cam_common_evt_inject_cmd_parse_handler)(
 	struct cam_common_inject_evt_param *inject_params,
 	uint32_t param_counter, char *token);
+
+#if defined(CONFIG_SAMSUNG_DEBUG_HW_INFO)
+void cam_check_error_sensor_type(int csiphy_num) {
+	if (csiphy_num == WIDE_CAM)
+		CAM_INFO(CAM_ISP, "[MIPI_DBG] WIDE_CAM mipi error!! (csiphy %d)", csiphy_num);
+	else if (csiphy_num == UW_CAM)
+		CAM_INFO(CAM_ISP, "[MIPI_DBG] UW_CAM mipi error!! (csiphy %d)", csiphy_num);
+	else if (csiphy_num == TELE1_CAM)
+		CAM_INFO(CAM_ISP, "[MIPI_DBG] TELE1_CAM mipi error!! (csiphy %d)", csiphy_num);
+	else if (csiphy_num == TELE2_CAM)
+		CAM_INFO(CAM_ISP, "[MIPI_DBG] TELE2_CAM mipi error!! (csiphy %d)", csiphy_num);
+	else if (csiphy_num == FRONT_CAM)
+		CAM_INFO(CAM_ISP, "[MIPI_DBG] FRONT_CAM mipi error!! (csiphy %d)", csiphy_num);
+	else if (csiphy_num == COVER_CAM)
+		CAM_INFO(CAM_ISP, "[MIPI_DBG] COVER_CAM mipi error!! (csiphy %d)", csiphy_num);
+	else if (csiphy_num == FRONT_AUX)
+		CAM_INFO(CAM_ISP, "[MIPI_DBG] COVER_CAM mipi error!! (csiphy %d)", csiphy_num);
+	else
+		CAM_INFO(CAM_ISP, "[MIPI_DBG] Unknown camera mipi error!! (csiphy %d)", csiphy_num);
+}
+#endif
+
+#if IS_ENABLED(CONFIG_SEC_ABC)
+void cam_abc_send_event_mipi_error(int csiphy_num)
+{
+	char msg1[32], ret[40];
+
+	sprintf(msg1, "%s", "MODULE=camera@WARN=mipi_error_");
+
+	switch (csiphy_num) {
+	case WIDE_CAM:
+		sprintf(ret, "%s%s", msg1, "rw1"); //wide
+		break;
+	case TELE1_CAM:
+		sprintf(ret, "%s%s", msg1, "rt1"); //tele 1
+		break;
+	case TELE2_CAM:
+		sprintf(ret, "%s%s", msg1, "rt2"); //tele 2
+		break;
+	case UW_CAM:
+		sprintf(ret, "%s%s", msg1, "rs1"); //uwide
+		break;
+	case FRONT_CAM:
+		sprintf(ret, "%s%s", msg1, "fw1"); //front
+		break;
+	default:
+		break;
+	}
+
+	sec_abc_send_event(ret);
+}
+#endif
 
 int cam_common_util_get_string_index(const char **strings,
 	uint32_t num_strings, const char *matching_string, uint32_t *index)
@@ -156,9 +211,8 @@ void cam_common_util_thread_switch_delay_detect(char *wq_name, const char *state
 	if (diff > threshold) {
 		scheduled_ts  = ktime_to_timespec64(scheduled_time);
 		cur_ts = ktime_to_timespec64(cur_time);
-		CAM_WARN_RATE_LIMIT_CUSTOM(CAM_UTIL, 5, 1,
-			"%s cb: %ps delay in %s detected %ld:%06ld cur %ld:%06ld\n"
-			"diff %ld: threshold %d",
+		CAM_WARN_RATE_LIMIT_CUSTOM(CAM_UTIL, 1, 1,
+			"%s cb: %ps delay in %s detected %ld:%06ld cur %ld:%06ld diff %ld: threshold %d",
 			wq_name, cb, state, scheduled_ts.tv_sec,
 			scheduled_ts.tv_nsec/NSEC_PER_USEC,
 			cur_ts.tv_sec, cur_ts.tv_nsec/NSEC_PER_USEC,
@@ -306,14 +360,9 @@ int cam_common_user_dump_helper(
 	void*(*func_ptr)(void *dump_struct, uint8_t *addr_ptr);
 
 	dump_args = (struct cam_common_hw_dump_args *)cmd_args;
-
-	if (!dump_args) {
-		CAM_ERR(CAM_UTIL, "dump_args is NULL!");
-		return -EINVAL;
-	}
 	if (!dump_args->cpu_addr || !dump_args->buf_len) {
 		CAM_ERR(CAM_UTIL,
-			"Invalid params: cpu_addr=%pk, buf_len=%zu",
+			"Invalid params %pK %zu",
 			(void *)dump_args->cpu_addr,
 			dump_args->buf_len);
 		return -EINVAL;
@@ -323,15 +372,6 @@ int cam_common_user_dump_helper(
 			"Dump offset overshoot offset %zu buf_len %zu",
 			dump_args->offset, dump_args->buf_len);
 		return -ENOSPC;
-	}
-	if (dump_args->offset + size + sizeof(struct cam_common_hw_dump_header)
-		> dump_args->buf_len) {
-		CAM_ERR(CAM_UTIL,
-			"Insufficient buffer space: offset %zu, required %zu, buf_len %zu",
-			dump_args->offset,
-			size + sizeof(struct cam_common_hw_dump_header),
-			dump_args->buf_len);
-		return -EINVAL;
 	}
 
 	dst = (uint8_t *)dump_args->cpu_addr + dump_args->offset;
@@ -346,17 +386,11 @@ int cam_common_user_dump_helper(
 	addr = (uint8_t *)(dst + sizeof(struct cam_common_hw_dump_header));
 	start = addr;
 
-	if (!func || !dump_struct) {
-		CAM_ERR(CAM_UTIL, "function ptr / dump struct is NULL");
-		return -EINVAL;
-	}
 	func_ptr = func;
 	returned_ptr = func_ptr(dump_struct, addr);
 
-	if (IS_ERR(returned_ptr) || !returned_ptr) {
-		CAM_ERR(CAM_UTIL, "function call failed!");
+	if (IS_ERR(returned_ptr))
 		return PTR_ERR(returned_ptr);
-	}
 
 	addr = (uint8_t *)returned_ptr;
 	hdr->size = addr - start;
@@ -417,9 +451,7 @@ void cam_common_release_evt_params(int32_t dev_hdl)
 static inline int cam_common_evt_inject_get_hw_id(uint8_t *hw_id, char *token)
 {
 	if (strcmp(token, CAM_COMMON_IFE_NODE) == 0)
-		*hw_id = CAM_COMMON_EVT_INJECT_HW_IFE;
-	else if (strcmp(token, CAM_COMMON_TFE_NODE) == 0)
-		*hw_id = CAM_COMMON_EVT_INJECT_HW_TFE;
+		*hw_id = CAM_COMMON_EVT_INJECT_HW_ISP;
 	else if (strcmp(token, CAM_COMMON_ICP_NODE) == 0)
 		*hw_id = CAM_COMMON_EVT_INJECT_HW_ICP;
 	else if (strcmp(token, CAM_COMMON_JPEG_NODE) == 0)
@@ -706,6 +738,9 @@ static int cam_common_evt_inject_set(const char *kmessage,
 		CAM_ERR(CAM_UTIL, "Invalid Injection id: %u", hw_evt_params->inject_id);
 	}
 
+	if (!parse_handler)
+		goto free;
+
 	rc = cam_common_evt_inject_generic_command_parser(inject_params, &msg,
 		param_output, parse_handler);
 	if (rc) {
@@ -756,11 +791,8 @@ static int cam_common_evt_inject_get(char *buffer,
 		evt_params = &inject_params->evt_params;
 
 		switch (inject_params->hw_id) {
-		case CAM_COMMON_EVT_INJECT_HW_IFE:
+		case CAM_COMMON_EVT_INJECT_HW_ISP:
 			strscpy(hw_name, CAM_COMMON_IFE_NODE, sizeof(hw_name));
-			break;
-		case CAM_COMMON_EVT_INJECT_HW_TFE:
-			strscpy(hw_name, CAM_COMMON_TFE_NODE, sizeof(hw_name));
 			break;
 		case CAM_COMMON_EVT_INJECT_HW_ICP:
 			strscpy(hw_name, CAM_COMMON_ICP_NODE, sizeof(hw_name));
@@ -853,7 +885,6 @@ static const struct kernel_param_ops cam_common_evt_inject = {
 };
 
 module_param_cb(cam_event_inject, &cam_common_evt_inject, NULL, 0644);
-
 int cam_common_mem_kdup(void **dst,
 	void *src, size_t size)
 {
